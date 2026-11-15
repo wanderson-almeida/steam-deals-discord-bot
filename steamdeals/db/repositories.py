@@ -428,8 +428,24 @@ class Repository:
         payload = json.loads(row["payload"])
         origins = set(payload.get("origins", [])) | item.origins
         users = set(payload.get("user_ids", [])) | item.user_ids
-        if origins == set(payload.get("origins", [])) and users == set(payload.get("user_ids", [])):
+        snap = item.snapshot
+        # The end date is display-only. Keep the pending message current when the same
+        # promotion (same prices and discount) reports a different, known end date.
+        new_end = (
+            snap.discount_end
+            if snap.discount_end is not None
+            and payload.get("final_cents") == snap.final_cents
+            and payload.get("original_cents") == snap.original_cents
+            and payload.get("discount_pct") == snap.discount_pct
+            else payload.get("discount_end")
+        )
+        if (
+            origins == set(payload.get("origins", []))
+            and users == set(payload.get("user_ids", []))
+            and new_end == payload.get("discount_end")
+        ):
             return
+        payload["discount_end"] = new_end
         payload["origins"] = sorted(origins)
         payload["user_ids"] = sorted(users)
         await c.execute(

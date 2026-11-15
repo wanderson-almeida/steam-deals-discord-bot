@@ -7,13 +7,44 @@ Statements use ``IF NOT EXISTS`` so re-running a script is harmless.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from typing import Awaitable, Callable
 
 import aiosqlite
 
 log = logging.getLogger(__name__)
 
-MIGRATIONS: list[tuple[int, str]] = [
+# A migration is either an SQL script or an async function that receives the
+# connection while the migration transaction is already open.
+Migration = str | Callable[[aiosqlite.Connection], Awaitable[None]]
+
+
+async def _migrate_signatures_without_end_date(conn: aiosqlite.Connection) -> None:
+    """Rewrite ``deal_state.last_signature`` of games on sale to the signature that
+    excludes ``discount_end`` (final, original, discount, sale epoch).
+
+    Without this, every game on sale would look like a new promotion after the
+    upgrade and be announced once more. The hash below is a frozen copy of the
+    signature format at the time of this migration; it must not follow later
+    changes of the application code. Notification rows keep their old signature
+    (they are history; only the comparison against ``deal_state`` matters).
+    """
+    async with conn.execute(
+        "SELECT appid, final_cents, original_cents, discount_pct, sale_epoch FROM deal_state "
+        "WHERE on_sale = 1 AND last_signature IS NOT NULL"
+    ) as cur:
+        rows = await cur.fetchall()
+    updates = []
+    for appid, final, original, pct, epoch in rows:
+        raw = f"{final}|{original}|{pct}"
+        if epoch:
+            raw += f"|e{epoch}"
+        updates.append((hashlib.sha256(raw.encode()).hexdigest()[:16], appid))
+    await conn.executemany("UPDATE deal_state SET last_signature = ? WHERE appid = ?", updates)
+
+
+MIGRATIONS: list[tuple[int, Migration]] = [
     (
         1,
         """
@@ -142,6 +173,7 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE deal_state ADD COLUMN missing_cycles INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    (3, _migrate_signatures_without_end_date),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
@@ -168,10 +200,16 @@ async def migrate(conn: aiosqlite.Connection) -> int:
             continue
         log.info("Applying database migration %d", number)
         try:
-            await conn.executescript(
-                f"BEGIN IMMEDIATE;\n{script}\n"
-                f"INSERT INTO schema_version (version) VALUES ({int(number)});\nCOMMIT;"
-            )
+            if isinstance(script, str):
+                await conn.executescript(
+                    f"BEGIN IMMEDIATE;\n{script}\n"
+                    f"INSERT INTO schema_version (version) VALUES ({int(number)});\nCOMMIT;"
+                )
+            else:
+                await conn.execute("BEGIN IMMEDIATE")
+                await script(conn)
+                await conn.execute("INSERT INTO schema_version (version) VALUES (?)", (int(number),))
+                await conn.execute("COMMIT")
         except Exception:
             try:
                 await conn.execute("ROLLBACK")

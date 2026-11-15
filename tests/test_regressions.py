@@ -396,3 +396,18 @@ async def test_real_network_is_blocked_in_tests():
         socket.getaddrinfo("store.steampowered.com", 443)
     with pytest.raises(RuntimeError, match="network"):
         socket.create_connection(("example.com", 80), timeout=1)
+
+
+async def test_promotion_returning_after_a_priceless_reading_is_a_new_notification_row(env):
+    """The expired row is not revived: the sale period counter makes the return a new promotion."""
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100)
+    await env.cycle()
+    env.store.items[100] = store_item(100, final=None, original=None, pct=0, end=None)
+    await env.cycle()
+    env.store.items[100] = store_item(100)
+    await env.cycle()
+    assert await env.repo.count_notifications("expired") == 1
+    assert await env.repo.count_notifications("pending") == 1
+    assert (await env.repo.get_deal_states())[100]["sale_epoch"] == 1

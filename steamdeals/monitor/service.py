@@ -2,9 +2,15 @@
 
 Detection rules
 ---------------
-* A *signature* is ``hash(final_cents, original_cents, discount_pct, discount_end)``
-  and exists only for items that are on sale. A game is announced when its
-  signature differs from the last one recorded for it. ``UNIQUE(appid, signature)``
+* A *signature* is ``hash(final_cents, original_cents, discount_pct, sale_epoch)``
+  and exists only for items that are on sale. The end date is not part of it: a
+  changed ``discount_end`` with the same prices/discount is stored for display but
+  is not announced again. ``sale_epoch`` increases when a sale ends and a new one
+  starts, so an identical promotion returning later is announced. The same holds
+  when the recorded end date had already passed (more than an hour ago) and the
+  same prices now report a later end; an extension before the end is silent. A game is
+  announced when its signature differs from the last one recorded for it.
+  ``UNIQUE(appid, signature)``
   on the notifications table guarantees one notification per game/state no
   matter how many users or origins (specials, wishlist, manual) contain it.
 * When a new signature is enqueued, older still-pending notifications of the
@@ -46,7 +52,7 @@ from ..models import (
     ORIGIN_WISHLIST,
     StateUpdate,
 )
-from ..steam.http import SteamError, SteamSchemaError
+from ..steam.http import SteamError, SteamSchemaError, SteamUnavailable
 from ..steam.specials import SpecialItem, SpecialsClient
 from ..steam.store import StoreClient, StoreItem, header_image_url
 from ..steam.wishlist import WishlistClient
@@ -58,11 +64,25 @@ MIN_KNOWN_FOR_COLLAPSE_CHECK = 20
 MIN_LISTING_RATIO = 0.5
 # Consecutive cycles a game must be absent from the listing before it counts as ended.
 MISSING_CYCLES_TO_END = 2
+# A recorded end date counts as expired this long after it passed (clock/rounding tolerance).
+EXPIRED_END_MARGIN_SECONDS = 3600
+
+
+# HTTP statuses with which Steam rejects the request itself (for example a SteamID64 that is
+# well formed but outside the valid range answers 400). Retrying will not help.
+INVALID_ID_HTTP_STATUSES = (400, 404)
+
+
+def import_failure_status(exc: Exception) -> str:
+    """Status stored in ``steam_links.last_import_status`` for a failed wishlist fetch."""
+    if isinstance(exc, SteamUnavailable) and exc.status in INVALID_ID_HTTP_STATUSES:
+        return "invalid_id"
+    return "error"
 
 
 @dataclass
 class ImportResult:
-    status: str  # 'ok' | 'empty_or_private' | 'not_linked' | 'error'
+    status: str  # 'ok' | 'empty_or_private' | 'invalid_id' | 'not_linked' | 'error'
     added: int = 0
     removed: int = 0
     total: int = 0
@@ -126,6 +146,7 @@ class MonitorService:
         *,
         max_concurrency: int = 5,
         dispatcher=None,
+        clock=time.time,
     ) -> None:
         self.repo = repo
         self.specials = specials
@@ -133,6 +154,7 @@ class MonitorService:
         self.wishlist = wishlist
         self.dispatcher = dispatcher
         self._max_concurrency = max_concurrency
+        self._clock = clock
         self._lock = asyncio.Lock()
         self.last_summary: CycleSummary | None = None
 
@@ -160,6 +182,10 @@ class MonitorService:
                 try:
                     result = await self.dispatcher.dispatch()
                     summary.dispatched = result.sent
+                    if result.aborted:
+                        summary.errors.append("dispatch: channel unavailable or rate limited")
+                    elif result.failed:
+                        summary.errors.append(f"dispatch: {result.failed} not delivered")
                 except Exception as exc:
                     log.exception("Dispatch step failed")
                     summary.errors.append(f"dispatch: {type(exc).__name__}")
@@ -226,8 +252,9 @@ class MonitorService:
             result = await self.wishlist.fetch(link["steam_id64"])
         except Exception as exc:
             log.warning("Wishlist import failed: %s", type(exc).__name__)
-            await self.repo.set_import_status(discord_id, "error")
-            return ImportResult("error", error=type(exc).__name__)
+            status = import_failure_status(exc)
+            await self.repo.set_import_status(discord_id, status)
+            return ImportResult(status, error=type(exc).__name__)
         return await self._apply_wishlist(discord_id, result, link["steam_id64"])
 
     async def _import_wishlists(self, summary: CycleSummary) -> None:
@@ -248,7 +275,7 @@ class MonitorService:
                 log.warning("Wishlist fetch failed for a linked account: %s", type(exc).__name__)
                 for user in users:
                     try:
-                        await self.repo.set_import_status(user, "error")
+                        await self.repo.set_import_status(user, import_failure_status(exc))
                     except Exception:
                         log.exception("Could not record import status")
                 summary.errors.append(f"wishlist: {type(exc).__name__}")
@@ -311,8 +338,19 @@ class MonitorService:
                 and prev["original_cents"] == snap.original_cents
                 and prev["discount_pct"] == snap.discount_pct
             )
+            if (
+                same_prices
+                and snap.discount_end is not None
+                and prev["discount_end"] is not None
+                and prev["discount_end"] < self._clock() - EXPIRED_END_MARGIN_SECONDS
+                and snap.discount_end > prev["discount_end"]
+            ):
+                # The recorded end had already passed and the same prices now carry a later end:
+                # a new sale period (an extension before the end stays silent).
+                snap = replace(snap, epoch=snap.epoch + 1)
             if same_prices and snap.discount_end is None:
-                # Specials do not expose the end date: keep the one already known.
+                # Specials do not expose the end date: keep the one already known
+                # (it is only displayed, it does not identify the promotion).
                 snap = replace(snap, discount_end=prev["discount_end"])
             signature = snap.signature
             never_announced = bool(prev and prev["baseline"]) and is_monitored
@@ -320,10 +358,6 @@ class MonitorService:
             if last == signature and not never_announced:
                 changes.states.append(StateUpdate(snap, baseline=bool(prev["baseline"])))
                 changes.merges.append(NewNotification(snap, origins, users))
-                return
-            if same_prices and not never_announced and last and prev["discount_end"] is None:
-                # Same promotion, we just learned its end date: no new announcement.
-                changes.states.append(StateUpdate(snap, set_signature=True))
                 return
             if baseline_pending and not is_monitored:
                 changes.states.append(StateUpdate(snap, baseline=True, set_signature=True))

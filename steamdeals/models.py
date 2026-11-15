@@ -15,9 +15,20 @@ def price_hash(
     original_cents: int | None,
     discount_pct: int | None,
     discount_end: int | None,
+) -> str:
+    """Hash of the full observed price state (end date included); detects any change."""
+    raw = f"{final_cents}|{original_cents}|{discount_pct}|{discount_end}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def promotion_hash(
+    final_cents: int | None,
+    original_cents: int | None,
+    discount_pct: int | None,
     epoch: int = 0,
 ) -> str:
-    raw = f"{final_cents}|{original_cents}|{discount_pct}|{discount_end}"
+    """Identity of one promotion: prices, discount and sale period. The end date is excluded."""
+    raw = f"{final_cents}|{original_cents}|{discount_pct}"
     if epoch:
         raw += f"|e{epoch}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -38,9 +49,8 @@ class DealSnapshot:
     formatted_final: str | None = None
     formatted_original: str | None = None
     image_url: str | None = None
-    # Counts how many sale periods the game has been through. Only used when
-    # the end date is unknown (specials listing), so that an identical promotion
-    # returning later is announced again.
+    # Counts how many sale periods the game has been through, so that an
+    # identical promotion returning after it ended is announced again.
     epoch: int = 0
 
     @property
@@ -49,11 +59,13 @@ class DealSnapshot:
 
     @property
     def signature(self) -> str:
-        """Identifies one promotion state; only meaningful when ``on_sale``."""
-        epoch = self.epoch if self.discount_end is None else 0
-        return price_hash(
-            self.final_cents, self.original_cents, self.discount_pct, self.discount_end, epoch
-        )
+        """Identifies one promotion; only meaningful when ``on_sale``.
+
+        Built from final price, original price, discount and sale period. The end
+        date is deliberately not part of it: extending or adjusting the end of an
+        otherwise identical promotion is not a new announcement.
+        """
+        return promotion_hash(self.final_cents, self.original_cents, self.discount_pct, self.epoch)
 
 
 @dataclass

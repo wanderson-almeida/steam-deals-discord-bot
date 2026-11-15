@@ -134,15 +134,76 @@ async def test_price_change_after_sent_notifies_again_and_keeps_sent(env):
     assert await env.repo.count_notifications("superseded") == 0
 
 
-async def test_end_date_change_is_a_new_promotion(env):
+async def test_end_date_change_alone_does_not_notify(env):
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=1800000000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    env.store.items[100] = store_item(100, end=1800099999)  # extended, same prices
+    summary = await env.cycle()
+    assert summary.enqueued == 0 and await env.pending() == []
+    assert await env.repo.count_notifications("superseded") == 0
+    state = (await env.repo.get_deal_states())[100]
+    assert state["discount_end"] == 1800099999  # still stored for display
+    assert [h["discount_end"] for h in await env.repo.price_history(100)] == [1800000000, 1800099999]
+
+
+async def test_end_date_change_updates_pending_payload_without_new_notification(env):
     await baseline(env)
     await env.repo.add_manual(1, 100, "G")
     env.store.items[100] = store_item(100, end=1800000000)
     await env.cycle()
     env.store.items[100] = store_item(100, end=1800099999)
     await env.cycle()
+    [n] = await env.pending()
+    assert n["payload"]["discount_end"] == 1800099999
+    assert await env.repo.count_notifications("superseded") == 0
+
+
+@pytest.mark.parametrize("change", [
+    {"final": 900, "pct": 55},
+    {"original": 2500, "pct": 60},
+])
+async def test_price_or_discount_change_with_new_end_still_notifies(env, change):
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=1800000000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    env.store.items[100] = store_item(100, end=1800099999, **change)
+    await env.cycle()
     assert len(await env.pending()) == 1
-    assert await env.repo.count_notifications("superseded") == 1
+
+
+async def test_sale_that_ended_and_returned_with_same_prices_and_new_end_notifies(env):
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=1800000000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    env.store.items[100] = store_item(100, final=2000, original=2000, pct=0, end=None)  # ended
+    await env.cycle()
+    env.store.items[100] = store_item(100, end=1800500000)  # same prices, later sale
+    await env.cycle()
+    [again] = await env.pending()
+    assert again["id"] != first["id"]
+
+
+async def test_end_date_discovered_after_specials_only_does_not_notify(env):
+    await baseline(env)
+    env.specials.items = [special(DUMMY), special(300)]
+    await env.cycle()
+    [n] = await env.pending()
+    await env.repo.mark_sent(n["id"], 1)
+    await env.repo.add_manual(1, 300, "G")  # now monitored; GetItems reports the end
+    env.store.items[300] = store_item(300, end=1800000000)
+    summary = await env.cycle()
+    assert summary.enqueued == 0 and await env.pending() == []
+    assert (await env.repo.get_deal_states())[300]["discount_end"] == 1800000000
 
 
 async def test_dedup_across_users_and_origins_single_notification_mentions_all(env):
@@ -384,3 +445,74 @@ async def test_dispatcher_runs_inside_cycle(env, repo):
 
 def test_store_item_defaults():
     assert not StoreItem(appid=1, name="x").on_sale
+
+
+# ------------------------------------------------- expired end date + later end = new sale
+NOW = 1_800_000_000
+
+
+def use_clock(env, value=NOW):
+    env.monitor._clock = lambda: value
+
+
+async def test_end_already_passed_and_later_end_with_same_prices_notifies_once(env):
+    use_clock(env)
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=NOW + 1000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    use_clock(env, NOW + 1000 + 2 * 3600)  # the recorded end passed more than an hour ago
+    env.store.items[100] = store_item(100, end=NOW + 10 * 86400)  # same prices, new period
+    summary = await env.cycle()
+    assert summary.enqueued == 1
+    [second] = await env.pending()
+    assert second["id"] != first["id"] and second["payload"]["discount_end"] == NOW + 10 * 86400
+    assert (await env.repo.get_deal_states())[100]["sale_epoch"] == 1
+    again = await env.cycle()  # idempotent on the next cycle
+    assert again.enqueued == 0 and len(await env.pending()) == 1
+    assert (await env.repo.get_deal_states())[100]["sale_epoch"] == 1
+
+
+async def test_extension_before_the_end_stays_silent(env):
+    use_clock(env)
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=NOW + 1000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    env.store.items[100] = store_item(100, end=NOW + 5 * 86400)
+    assert (await env.cycle()).enqueued == 0
+    # Just after the end, inside the one hour tolerance, an extension is still silent.
+    use_clock(env, NOW + 5 * 86400 + 600)
+    env.store.items[100] = store_item(100, end=NOW + 9 * 86400)
+    assert (await env.cycle()).enqueued == 0
+    assert await env.pending() == []
+
+
+async def test_earlier_or_unknown_end_after_expiry_does_not_notify(env):
+    use_clock(env)
+    await baseline(env)
+    await env.repo.add_manual(1, 100, "G")
+    env.store.items[100] = store_item(100, end=NOW + 1000)
+    await env.cycle()
+    [first] = await env.pending()
+    await env.repo.mark_sent(first["id"], 1)
+    use_clock(env, NOW + 10 * 3600)
+    env.store.items[100] = store_item(100, end=NOW + 500)  # not later than the recorded one
+    assert (await env.cycle()).enqueued == 0
+    env.store.items[100] = store_item(100, end=None)  # unknown end
+    assert (await env.cycle()).enqueued == 0
+
+
+async def test_specials_without_end_never_trigger_the_expired_end_rule(env):
+    use_clock(env, NOW + 99 * 86400)
+    await baseline(env)
+    env.specials.items = [special(DUMMY), special(300)]
+    await env.cycle()
+    [n] = await env.pending()
+    await env.repo.mark_sent(n["id"], 1)
+    for _ in range(3):
+        assert (await env.cycle()).enqueued == 0
