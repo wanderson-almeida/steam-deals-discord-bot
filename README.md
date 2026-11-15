@@ -67,6 +67,7 @@ the same bot, they stay registered and show up next to the guild commands (dupli
 | `CHECK_INTERVAL_MINUTES` | `30` | Interval between monitoring cycles, counted from the start of one cycle to the start of the next. A cycle takes about 4 minutes, so values below 10 log a warning and are meant for short tests. |
 | `MAX_CONCURRENCY` | `5` | Simultaneous requests to Steam. |
 | `MAX_NOTIFICATIONS_PER_CYCLE` | `20` | Maximum notifications sent per cycle (the rest stays queued). |
+| `MANUAL_CHECK_COOLDOWN_SECONDS` | `300` | Minimum seconds between manual checks (`/steam_verificar`). Global for the bot (one cycle serves every server), measured from the start of the last manual cycle. `0` disables it. |
 | `INCLUDE_NON_GAMES` | `false` | `false` = base games only (`category1=998`); `true` also includes DLC, software, etc. |
 | `DATABASE_PATH` | `data/steamdeals.db` | SQLite file. |
 | `STEAM_COUNTRY` | `br` | Store country (prices). |
@@ -83,6 +84,7 @@ notifications are public. Each user can only change their own data.
 | Command | What it does |
 | --- | --- |
 | `/steam_status` | Last check per source, pending queue, next cycle and number of monitored games. Internal error details are shown only to members with the **Manage Server** permission. |
+| `/steam_verificar` | **Administrators only** (the **Manage Server** permission, the same rule used for the details in `/steam_status`). Runs one monitoring cycle now, in the background: the reply is immediate and the result (duration, games checked, notifications enqueued and sent, failures per source) is sent as a follow-up when the cycle ends (about 4 minutes; interaction webhooks are valid for 15 minutes). |
 | `/steam_vincular steam_id` | Links your account (17-digit SteamID64 or a `steamcommunity.com/profiles/<id>` URL) and imports the wishlist (respecting the minimum import interval; during the interval the next cycle imports it). Custom URLs (`/id/name`) are not supported. |
 | `/steam_desvincular` | Removes the link and the games that came from the wishlist; manually added games stay. |
 | `/wishlist` | Lists your monitored games with the last known price (up to 25 items plus a count). |
@@ -190,6 +192,33 @@ Note: the offers search does not report the end date. The end date only comes fr
 - `error`: temporary failure (HTTP 429/5xx, timeout, network error) or a malformed response. Sources are **kept**, the
   failure is never reported as "private", and the next cycle retries.
 
+### Manual check (`/steam_verificar`)
+
+The command runs the regular `MonitorService.run_cycle` (same baseline, dedupe, persistent queue, 20-per-cycle limit and
+dispatch as the scheduled cycle) in a background `asyncio` task; it never restarts or reschedules the `tasks.loop`.
+
+- Only members with **Manage Server** can use it; anyone else gets an ephemeral refusal. It is guild-only. The command
+  is also registered with `default_member_permissions=manage_guild`, which only hides it from other members in the
+  Discord UI (server admins can change that there); the check in the handler is the real guard.
+- The report does not mix numbers: `Ofertas` is the number of specials read (or "falhou" when that source failed),
+  `Monitorados` is the number of monitored games with the count that had no price or failed, wishlist failures are
+  listed separately, and the title says "concluída com falhas" when any source reported an error.
+- A scheduled tick that fires while a manual cycle is running is skipped by the monitor lock (and logged); the next
+  scheduled cycle happens at the following interval, it is not postponed or restarted.
+- While the bot is shutting down new manual requests are refused ("closing").
+- If a cycle is already running (scheduled or manual) it says so and starts nothing. The request has no `await` between
+  the checks and the task creation, so two simultaneous requests start a single cycle, and the monitor lock remains the
+  guarantee against overlap: if a scheduled cycle takes the lock first, the manual run is skipped.
+- Cooldown (`MANUAL_CHECK_COOLDOWN_SECONDS`, default 300) is **global** for the bot, because the cycle is global. It is
+  consumed only when a cycle was really started (not when refused, skipped or already running) and the remaining time
+  is shown.
+- The result goes to the interaction follow-up (ephemeral). If that fails (expired webhook, HTTP error) it is only
+  logged, never posted to the public channel; the last manual result (who, when, summary) is kept and shown to
+  administrators in `/steam_status`. Internal error details are never sent to non-admins.
+- `client.close()` cancels and waits for running manual checks before closing the HTTP session and the database.
+- Command sync is unchanged: the existing `tree.sync` in `setup_hook` registers it, so the log line now reads
+  `Synced 9 slash commands` (immediate with `GUILD_ID`, up to about an hour for global commands).
+
 ### "At-least-once" delivery and queue states
 
 A notification is marked `sent` only **after** sending to Discord returns success (and the `message_id` is stored).
@@ -276,7 +305,7 @@ baseline behaviour; cycle 2 shows whether anything is announced again without a 
 | Detection, dedupe, `discount_end` handling, baseline, queue, superseded | Yes | Full cycles with the real Steam and a fake sender (`scripts/validate_cycle.py`) | n/a |
 | Coverage/absence heuristics (90% of `total_count`, 50% collapse, 2 missing cycles) | Yes (simulated incomplete listings) | Measured on real full listings | n/a |
 | Wishlist empty/private/unavailable outcomes and user messages | Yes | Public wishlist only | n/a |
-| Slash commands and permissions | Yes (fake `Interaction` objects) | n/a | **Not validated** on a real Discord server |
+| Slash commands (9) and permissions, including `/steam_verificar` | Yes (fake `Interaction` objects) | n/a | **Not validated** on a real Discord server |
 | Embed/mention sending, `allowed_mentions` | Yes (fake channel) | n/a | **Not validated** on real Discord |
 | Command sync, loop, bot login, channel permissions | Bot construction, setup and shutdown tested | n/a | **Not validated** (requires a token and a server) |
 
