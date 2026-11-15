@@ -1,226 +1,284 @@
 # Steam Deals Discord Bot
 
-Bot do Discord que monitora promoções da Steam e avisa em **um único canal**:
+A Discord bot that monitors Steam promotions and announces them in **a single channel**:
 
-- **Ofertas especiais** da loja (jogos base com desconto, preços em BRL);
-- jogos da **wishlist** dos usuários que vincularam a conta Steam (wishlist pública);
-- jogos adicionados **manualmente** com `/wishlist_add`.
+- store **special offers** (base games on sale, prices in BRL);
+- games on the **wishlist** of users who linked their Steam account (public wishlist);
+- games added **manually** with `/wishlist_add`.
 
-Cada promoção gera **uma única notificação por jogo e por estado de preço**, mesmo que vários usuários ou
-várias origens (ofertas especiais, wishlist, lista manual) contenham o jogo. Os usuários interessados são
-mencionados na mesma mensagem.
+Each promotion produces **one notification per game and per price state**, even when several users or several
+origins (special offers, wishlist, manual list) contain the game. All interested users are mentioned in the same
+message.
 
-## Requisitos
+User-facing bot messages (slash command replies and notification embeds) are in Brazilian Portuguese; the code,
+logs and this README are in English.
 
-- Python 3.12 ou superior (desenvolvido e testado em Python 3.14; `discord.py` 2.7 importa e roda normalmente).
-- Um bot criado no Discord Developer Portal.
-- Acesso HTTPS à Steam (nenhuma chave de API da Steam é necessária).
+## Requirements
 
-## Instalação no Windows
+- Python 3.12 or newer (developed and tested on Python 3.14; `discord.py` 2.7 imports and runs normally).
+- A bot created in the Discord Developer Portal.
+- HTTPS access to Steam (no Steam API key is needed).
+- Git, to clone the repository.
+
+## Installation on Windows
 
 ```powershell
-cd steam-promo
+git clone https://github.com/wanderson-almeida/steam-deals-discord-bot.git
+cd steam-deals-discord-bot
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-# para rodar os testes:
+# to run the tests:
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 copy .env.example .env
 ```
 
-### Criar o bot no Developer Portal
+All commands in this document are run from the cloned directory (`steam-deals-discord-bot`).
 
-1. Acesse <https://discord.com/developers/applications> e clique em **New Application**.
-2. Na aba **Bot**, crie o bot e copie o token (**Reset Token**). Cole em `DISCORD_BOT_TOKEN` no `.env`.
-   Nunca compartilhe nem versione esse token.
-3. **Não é necessário** ativar nenhuma *Privileged Gateway Intent* (sem *Message Content Intent*).
-4. Em **OAuth2 > URL Generator**, marque os escopos `bot` e `applications.commands`.
-5. Permissões mínimas do bot no canal de notificações: **View Channel**, **Send Messages** e **Embed Links**.
-6. Abra a URL gerada e adicione o bot ao servidor.
-7. Ative o modo desenvolvedor no Discord, copie o ID do canal de notificações (`NOTIFY_CHANNEL_ID`) e,
-   opcionalmente, o ID do servidor (`GUILD_ID`).
+### Creating the bot in the Developer Portal
 
-## Execução
+1. Go to <https://discord.com/developers/applications> and click **New Application**.
+2. On the **Bot** tab, create the bot and copy the token (**Reset Token**). Paste it into `DISCORD_BOT_TOKEN` in
+   `.env`. Never share or commit this token.
+3. **No** *Privileged Gateway Intent* is required (no *Message Content Intent*).
+4. Under **OAuth2 > URL Generator**, select the `bot` and `applications.commands` scopes.
+5. Minimum bot permissions in the notification channel: **View Channel**, **Send Messages** and **Embed Links**.
+6. Open the generated URL and add the bot to your server.
+7. Enable developer mode in Discord, copy the notification channel ID (`NOTIFY_CHANNEL_ID`) and, optionally, the
+   server ID (`GUILD_ID`).
+
+## Running
 
 ```powershell
 .venv\Scripts\python bot.py
 ```
 
-No primeiro ciclo o bot registra todas as ofertas especiais existentes como *baseline* **sem notificar**
-(veja "Baseline" abaixo). Os comandos slash são sincronizados na inicialização; com `GUILD_ID` definido a
-sincronização é imediata naquele servidor, sem ele os comandos globais podem levar até cerca de uma hora para
-aparecer.
+On the first cycle the bot records every existing special offer as a *baseline* **without notifying** (see
+"Baseline" below). Slash commands are synced on startup; with `GUILD_ID` set the sync is immediate for that server,
+without it the global commands can take up to about an hour to appear. If global commands were synced earlier with
+the same bot, they stay registered and show up next to the guild commands (duplicates) until removed.
 
-## Configuração (`.env`)
+## Configuration (`.env`)
 
-| Variável | Padrão | Descrição |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `DISCORD_BOT_TOKEN` | (obrigatória) | Token do bot. Nunca é registrado nos logs (mascarado). |
-| `NOTIFY_CHANNEL_ID` | (obrigatória) | Canal onde as promoções são publicadas. |
-| `GUILD_ID` | vazio | Servidor para sincronização rápida dos comandos. |
-| `CHECK_INTERVAL_MINUTES` | `30` | Intervalo entre ciclos de verificação. |
-| `MAX_CONCURRENCY` | `5` | Requisições simultâneas à Steam. |
-| `MAX_NOTIFICATIONS_PER_CYCLE` | `20` | Máximo de notificações enviadas por ciclo (o excedente fica na fila). |
-| `INCLUDE_NON_GAMES` | `false` | `false` = só jogos base (`category1=998`); `true` inclui DLC, software etc. |
-| `DATABASE_PATH` | `data/steamdeals.db` | Arquivo SQLite. |
-| `STEAM_COUNTRY` | `br` | País da loja (preços). |
-| `STEAM_LANGUAGE` | `brazilian` | Idioma da API da loja (a busca usa `portuguese`, mapeado automaticamente). |
-| `LOG_LEVEL` | `INFO` | Nível de log. |
+| `DISCORD_BOT_TOKEN` | (required) | Bot token. Never written to logs (masked). |
+| `NOTIFY_CHANNEL_ID` | (required) | Channel where promotions are posted. |
+| `GUILD_ID` | empty | Server used for fast command sync. |
+| `CHECK_INTERVAL_MINUTES` | `30` | Interval between monitoring cycles, counted from the start of one cycle to the start of the next. A cycle takes about 4 minutes, so values below 10 log a warning and are meant for short tests. |
+| `MAX_CONCURRENCY` | `5` | Simultaneous requests to Steam. |
+| `MAX_NOTIFICATIONS_PER_CYCLE` | `20` | Maximum notifications sent per cycle (the rest stays queued). |
+| `INCLUDE_NON_GAMES` | `false` | `false` = base games only (`category1=998`); `true` also includes DLC, software, etc. |
+| `DATABASE_PATH` | `data/steamdeals.db` | SQLite file. |
+| `STEAM_COUNTRY` | `br` | Store country (prices). |
+| `STEAM_LANGUAGE` | `brazilian` | Store API language (the search endpoint uses `portuguese`, mapped automatically). |
+| `LOG_LEVEL` | `INFO` | Log level. |
 
-Erros de configuração (variável ausente, número inválido etc.) são listados de uma só vez na inicialização.
+Configuration errors (missing variable, invalid number, etc.) are listed all at once at startup.
 
-## Comandos
+## Commands
 
-Todos os comandos funcionam apenas em servidores, e as respostas são **efêmeras** (só quem executou vê).
-Somente as notificações de promoção são públicas. Cada usuário só altera os próprios dados.
+All commands work in servers only, and replies are **ephemeral** (only the invoking user sees them). Only promotion
+notifications are public. Each user can only change their own data.
 
-| Comando | O que faz |
+| Command | What it does |
 | --- | --- |
-| `/steam_status` | Última verificação por fonte, fila pendente, próximo ciclo e quantidade de jogos monitorados. Detalhes internos de erro aparecem apenas para quem tem a permissão **Gerenciar Servidor**. |
-| `/steam_vincular steam_id` | Vincula sua conta (SteamID64 de 17 dígitos ou URL `steamcommunity.com/profiles/<id>`) e importa a wishlist (respeitando o intervalo mínimo de importação; se estiver em intervalo, o ciclo seguinte importa). URLs personalizadas (`/id/nome`) não são suportadas. |
-| `/steam_desvincular` | Remove o vínculo e os jogos vindos da wishlist; os adicionados manualmente permanecem. |
-| `/wishlist` | Lista seus jogos monitorados com o último preço conhecido (até 25 itens + contagem). |
-| `/wishlist_add appid` | Adiciona um jogo manualmente (autocompletar por nome ou AppID numérico; validado na Steam). Limite de 100 jogos manuais por usuário; AppID até 2^31-1. |
-| `/wishlist_remover appid` | Remove um jogo da lista manual (autocompletar sobre os seus jogos manuais). |
-| `/wishlist_importar` | Reimporta agora a wishlist vinculada (intervalo mínimo de 120 s por usuário). |
-| `/steam_ofertas [quantidade]` | Maiores descontos registrados no banco (1 a 15, padrão 10). |
+| `/steam_status` | Last check per source, pending queue, next cycle and number of monitored games. Internal error details are shown only to members with the **Manage Server** permission. |
+| `/steam_vincular steam_id` | Links your account (17-digit SteamID64 or a `steamcommunity.com/profiles/<id>` URL) and imports the wishlist (respecting the minimum import interval; during the interval the next cycle imports it). Custom URLs (`/id/name`) are not supported. |
+| `/steam_desvincular` | Removes the link and the games that came from the wishlist; manually added games stay. |
+| `/wishlist` | Lists your monitored games with the last known price (up to 25 items plus a count). |
+| `/wishlist_add appid` | Adds a game manually (autocomplete by name or numeric AppID; validated against Steam). Limit of 100 manual games per user; AppID up to 2^31-1. |
+| `/wishlist_remover appid` | Removes a game from the manual list (autocomplete over your own manual games). |
+| `/wishlist_importar` | Re-imports the linked wishlist now (120 s minimum interval per user). |
+| `/steam_ofertas [quantidade]` | Biggest discounts recorded in the database (1 to 15, default 10). |
 
-## Arquitetura
+## Architecture
 
 ```
-bot.py                      ponto de entrada
+bot.py                      entry point
 steamdeals/
-  config.py                 Settings a partir do .env
-  logging_setup.py          logging + máscara do token
-  app.py                    montagem dos componentes (Services)
-  models.py                 DealSnapshot, assinatura (hash) de promoção
+  config.py                 Settings from .env
+  logging_setup.py          logging + token masking
+  app.py                    wiring of all components (Services)
+  models.py                 DealSnapshot, promotion signature (hash)
   steam/                    http.py (retry/backoff/429), specials.py, store.py, wishlist.py, suggest.py
   db/                       database.py (aiosqlite, WAL, FKs), migrations.py, repositories.py
-  monitor/service.py        ciclo: fontes -> detecção -> fila
-  notify/                   dispatcher.py (fila persistente), embeds.py
-  discord_bot/              client.py (loop, sync, envio), commands.py (slash commands)
-scripts/smoke_steam.py      validação manual contra a Steam real (sem Discord)
-tests/                      pytest (sem rede)
+  monitor/service.py        cycle: sources -> detection -> queue
+  notify/                   dispatcher.py (persistent queue), embeds.py
+  discord_bot/              client.py (loop, sync, sending), commands.py (slash commands)
+scripts/smoke_steam.py      manual validation against the real Steam (no Discord)
+scripts/validate_cycle.py   full real cycles with a temporary database and a fake sender
+tests/                      pytest (no network)
 ```
 
-### Ciclo de monitoramento
+### Monitoring cycle
 
-1. **Specials**: pagina `store.steampowered.com/search/results` (`specials=1`, 100 por página, pausa de 3 s
-   entre páginas; um ciclo completo leva cerca de 4 minutos). Falha da fonte é registrada em `check_state` e o ciclo continua com as demais.
-2. **Wishlists**: um `GetWishlist` por SteamID distinto (concorrência limitada); sincroniza as origens
-   `wishlist` (remove o que saiu, preserva as `manual`).
-3. **Preços**: o conjunto deduplicado de AppIDs monitorados (união de todos os usuários) é consultado em lotes de
-   100 no `IStoreBrowseService/GetItems` (cada AppID uma vez por ciclo; fallback para `appdetails` se um lote falhar).
-4. **Detecção**: a *assinatura* é `hash(preço final, preço original, % desconto, término)` e só existe para itens
-   realmente em desconto. Assinatura nova para um AppID enfileira uma notificação (`UNIQUE(appid, assinatura)`).
-   Preços inconsistentes (final maior que o original, desconto 0, sem preço) não geram notificação.
-5. **Fila**: uma notificação por jogo/estado. Origens e usuários a mencionar são mesclados enquanto ela estiver
-   pendente. Quando uma assinatura mais nova é enfileirada, a pendente antiga vira `superseded` (continua no banco,
-   registrada, nunca apagada em silêncio).
-6. **Envio**: até `MAX_NOTIFICATIONS_PER_CYCLE` por ciclo, das mais antigas para as mais novas; o excedente continua
-   `pending`. Um `asyncio.Lock` impede ciclos simultâneos (o segundo disparo é pulado e logado).
+1. **Specials**: paginates `store.steampowered.com/search/results` (`specials=1`, 100 per page, 3 s pause between
+   pages; a full cycle takes about 4 minutes). A source failure is recorded in `check_state` and the cycle continues
+   with the other sources.
+2. **Wishlists**: one `GetWishlist` per distinct SteamID (bounded concurrency); syncs the `wishlist` origins (removes
+   what left, preserves `manual` ones).
+3. **Prices**: the deduplicated set of monitored AppIDs (union of all users) is queried in batches of 100 on
+   `IStoreBrowseService/GetItems` (each AppID once per cycle; falls back to `appdetails` if a batch fails).
+4. **Detection**: the *signature* is `hash(final price, original price, discount %, sale epoch)` and exists only for
+   items that are actually on sale. A new signature for an AppID enqueues a notification
+   (`UNIQUE(appid, signature)`). Inconsistent prices (final above original, zero discount, no price) never produce a
+   notification.
+5. **Queue**: one notification per game/state. Origins and users to mention are merged while it is pending. When a
+   newer signature is enqueued, the older pending one becomes `superseded` (it stays in the database, never silently
+   deleted).
+6. **Sending**: up to `MAX_NOTIFICATIONS_PER_CYCLE` per cycle, oldest first; the rest stays `pending`. The loop waits
+   for a cycle to finish before starting the next iteration, and an `asyncio.Lock` additionally skips (and logs) an
+   overlapping run.
 
 ### Baseline
 
-Na primeira execução em que a fonte `specials` é lida com sucesso (flag `specials_baseline_done` em `settings`), todas
-as ofertas existentes são gravadas em `deal_state` com `baseline=1` e **sem notificação**, para não inundar o canal.
-Jogos que tenham origem wishlist/manual **não** são suprimidos e notificam normalmente. Depois do baseline, jogos novos
-nas ofertas ou com assinatura alterada notificam. Se a leitura de `specials` falhar, o baseline **não** é marcado como
-concluído e é refeito no ciclo seguinte. Se um jogo do baseline passar a ser monitorado por alguém, ele é anunciado
-uma vez (nunca tinha sido anunciado).
+On the first run in which the `specials` source is read successfully (`specials_baseline_done` flag in `settings`),
+every existing offer is stored in `deal_state` with `baseline=1` and **without a notification**, so the channel is not
+flooded. Games with a wishlist/manual origin are **not** suppressed and notify normally. After the baseline, new games
+in the offers or with a changed signature notify. If the `specials` read fails, the baseline is **not** marked as done
+and is retried on the next cycle. If a baseline game later becomes monitored by someone, it is announced once (it had
+never been announced).
 
-Observação: a busca de ofertas não informa a data de término. Para jogos apenas nas ofertas especiais a assinatura usa
-o término desconhecido; para evitar duplicatas, o término já conhecido é reaproveitado quando o preço é idêntico, e
-uma promoção idêntica que volte depois de ter terminado é anunciada de novo (contador interno `sale_epoch`).
+Note: the offers search does not report the end date. The end date only comes from `GetItems`, for monitored games.
 
-**Comportamentos de detecção a conhecer**
+**Detection behaviours to know**
 
-- **Mudança de `discount_end` reanuncia.** O término faz parte da assinatura: se a Steam prorrogar ou alterar a data de
-  uma promoção (mesmo com o mesmo preço) de um jogo monitorado, isso conta como novo estado e gera nova notificação.
-- **Reversão A -> B -> A**: se o preço volta a um estado já notificado, a linha existente (`UNIQUE(appid, assinatura)`)
-  é reativada como `pending` e reanunciada, e a pendente intermediária (B) vira `superseded`.
-- **Fonte `specials` inválida não apaga estado.** Lista vazia, ou com menos de 90% do `total_count`, ou que desabe para
-  menos de 50% do que já era conhecido (com 20+ itens), é tratada como falha da fonte: nada é limpo e o baseline não é
-  marcado. Um jogo que some da listagem só deixa de estar em oferta depois de **2 ciclos consecutivos** de ausência
-  (`deal_state.missing_cycles`); sumir por um ciclo (deslocamento de página) e voltar não reanuncia. O mesmo vale para
-  um jogo que deixou de ser monitorado (também zerado ao remover a origem em `game_sources`).
-- **`/wishlist_add` e jogo já anunciado**: se o jogo já está em promoção com o mesmo estado que foi anunciado antes, o
-  usuário que o adiciona depois **não** gera nova notificação nem é mencionado; ele é mencionado nas promoções seguintes
-  (ou na pendente ainda não enviada, pois usuários e origens são mesclados por jogo).
-- Trocar o SteamID64 com `/steam_vincular` descarta as origens `wishlist` da conta antiga (as manuais ficam). Um
-  resultado de wishlist obtido para um vínculo que mudou ou foi removido durante a requisição é descartado.
+- **A changed `discount_end` does not notify.** The end date is not part of the signature. If Steam extends or adjusts
+  the end of a promotion that keeps the same final price, original price and discount, no new notification is sent.
+  The latest known end date is still stored in `deal_state` (and recorded in `price_history`) and is applied to the
+  payload of a notification that is still pending, for display. A new final price, original price or discount is a
+  new promotion and notifies; learning the end date of a promotion first seen in the specials listing does not notify.
+- **A sale that ended and came back notifies again.** `deal_state.sale_epoch` increases when a game goes from "not on
+  sale" to "on sale"; it is part of the signature, so an identical promotion (even with the same prices) returning
+  after it ended is announced again.
+- **Extension versus a new period.** If the recorded end date had already passed (by more than one hour) and the same
+  final price, original price and discount now report a **later** end date, it is treated as a new sale period
+  (`sale_epoch` increases) and notifies once. Extending the end **before** it passes stays silent. This only applies
+  to games whose end date is known (monitored games); the specials listing, which has no end date, never triggers it.
+- **Known limitation: a priceless reading counts as the end of the sale.** If one cycle reads a monitored game without
+  a valid price (for example a transient Steam glitch), the game is considered off sale and its pending notification
+  becomes `expired`. When the identical promotion is read again, it is announced again (as a new row), so a duplicate
+  notification is possible in that case; there is no "no duplicates" guarantee across such a reading.
+- **Upgrading an existing database.** Migration 3 rewrites `deal_state.last_signature` of games currently on sale to
+  the new signature format, so upgrading does not re-announce every game on sale. Existing notification rows keep
+  their old signature (history only).
+- **A -> B -> A reversion**: if the price returns to a state that was already announced, the existing row
+  (`UNIQUE(appid, signature)`) is reactivated as `pending` and announced again, and the intermediate pending one (B)
+  becomes `superseded`.
+- **An invalid `specials` source does not erase state.** An empty list, one with fewer than 90% of `total_count`, or
+  one that collapses to less than 50% of what was already known (with 20+ items) is treated as a source failure:
+  nothing is cleared and the baseline is not marked. A game that disappears from the listing stops being on sale only
+  after **2 consecutive cycles** of absence (`deal_state.missing_cycles`); disappearing for one cycle (page shift) and
+  coming back does not re-announce. The same applies to a game that stopped being monitored (also reset when the
+  origin is removed from `game_sources`).
+- **`/wishlist_add` and an already announced game**: if the game is already on sale in the same state that was
+  announced before, the user who adds it later does **not** trigger a new notification and is not mentioned; they are
+  mentioned on following promotions (or on the still-unsent pending one, since users and origins are merged per game).
+- Changing the SteamID64 with `/steam_vincular` discards the `wishlist` origins of the old account (manual ones stay).
+  A wishlist result obtained for a link that changed or was removed during the request is discarded.
 
-### Entrega "at-least-once" e estados da fila
+### Wishlist import outcomes
 
-Uma notificação só é marcada `sent` **depois** que o envio ao Discord retorna sucesso (e o `message_id` é gravado).
-Falhas (`HTTPException`, 429, `Forbidden`, canal inexistente) guardam `last_error` e a mantêm `pending` para o próximo
-ciclo, sem derrubar o ciclo; erros de canal (403/404/429, canal indisponível) interrompem o lote em vez de insistir e
-**não** consomem tentativas. Outros erros incrementam `attempts`; ao chegar a **5 tentativas** a linha vira `failed`
-(mensagem "venenosa": permanece registrada, sai da seleção, e `/steam_status` mostra a contagem). Notificações
-pendentes sobrevivem a reinicializações.
+`steam_links.last_import_status` records the last outcome per user:
 
-Estados na tabela `notifications`: `pending`, `sent`, `superseded` (substituída por um estado mais novo do mesmo jogo),
-`expired` (o jogo deixou de estar em promoção antes do envio; revalidado contra `deal_state` antes de enviar) e
-`failed`. Nenhuma é apagada em silêncio, mas **nem toda notificação enfileirada chega ao canal**: as `superseded`,
-`expired` e `failed` ficam só registradas no banco. Se a mesma promoção voltar (por exemplo após uma leitura transitória
-sem preço), a linha `expired` é reativada.
+- `ok`: wishlist read and synced.
+- `empty_or_private`: Steam answered `{"response":{}}` (or an empty list). Private and empty look identical, so
+  existing wishlist sources are **kept** and the user is told it is "empty or private".
+- `invalid_id`: Steam rejected the SteamID64 itself (HTTP 400/404, for example a well formed ID outside the valid
+  range). Sources are kept; the user is told to check the ID and link again. A well formed but nonexistent profile is
+  **not** rejected by Steam: it answers `{"response":{}}`, so it is reported as `empty_or_private`.
+- `error`: temporary failure (HTTP 429/5xx, timeout, network error) or a malformed response. Sources are **kept**, the
+  failure is never reported as "private", and the next cycle retries.
 
-**Risco:** se o processo cair (ou a gravação falhar) exatamente entre o `send()` bem-sucedido e o
-`UPDATE ... sent`, a mesma notificação será reenviada após a reinicialização. Pode haver duplicata; uma notificação
-nunca some sem registro, mas as garantias acima (superseded/expired/failed) significam que não há entrega garantida de
-toda promoção observada.
+### "At-least-once" delivery and queue states
 
-## Limitações reais das APIs da Steam
+A notification is marked `sent` only **after** sending to Discord returns success (and the `message_id` is stored).
+Failures (`HTTPException`, 429, `Forbidden`, missing channel) store `last_error` and keep it `pending` for the next
+cycle without bringing the cycle down; channel-level errors (403/404/429, unavailable channel) stop the batch instead of
+retrying and do **not** consume attempts, and the cycle error list (visible to admins in `/steam_status`) reports
+`dispatch: channel unavailable or rate limited`. Other errors increment `attempts`; at **5 attempts** the row becomes
+`failed` (a "poison" message: it stays recorded, leaves the selection, and `/steam_status` shows the count). Pending
+notifications survive restarts.
 
-- Os endpoints usados **não são documentados oficialmente** e podem mudar sem aviso (busca, `GetItems`, `GetWishlist`,
-  `search/suggest`, `appdetails`).
-- A busca de ofertas devolve **HTML dentro de JSON**: o parser é frágil por natureza. Uma página sem linhas com
-  `total_count > 0` gera `SteamSchemaError` (a fonte falha de forma visível, sem notificar dados errados).
-- **Wishlist privada e wishlist vazia são indistinguíveis** (`{"response":{}}` nos dois casos). O bot explica isso ao
-  usuário e, nesse caso, **não apaga** os jogos já importados (use `/steam_desvincular` para limpar).
-- O **término da oferta** só vem do `GetItems`; a busca de ofertas não o informa.
-- `GetItems`: lote de **100 AppIDs** adotado. Em teste, 500 retornou HTTP 400, 200 funcionou e POST retorna 405.
-- **Rate limits não documentados**: durante a validação a busca paginada recebeu HTTP 429 sem cabeçalho
-  `Retry-After`. O cliente faz backoff exponencial com jitter, respeita `Retry-After` quando existe e pausa 3 s
-  entre páginas (com 1,6 s/página o 429 apareceu após ~26 páginas; com 3 s as 67 páginas passaram sem 429). Se uma
-  página continuar limitada, o cliente pausa 60 s e tenta de novo (2 vezes) antes de falhar a fonte, que é refeita
-  no ciclo seguinte. `count` acima de 100 é ignorado pela Steam.
-- **URLs personalizadas (vanity, `/id/nome`) não são suportadas** (resolver exigiria chave de API).
-- `category1=998` reduz a busca a jogos base: na validação real o total caiu de 9906 para 6592 itens e a amostra
-  de 100 itens passou a conter apenas `type=0` (sem DLC, que apareciam como `type=4` sem o filtro).
-- A ordenação padrão da busca (relevância) é **instável durante a paginação**: em um ciclo completo houve 210 linhas
-  duplicadas e cerca de 210 jogos ausentes, o que geraria falsos "novos" no ciclo seguinte (137 notificações
-  indevidas na validação). Por isso a busca usa `sort_by=Name_ASC`: 6570 jogos únicos, 0 duplicatas.
-- Jogos que entram em promoção como pacote/bundle (`data-ds-bundleid`/`packageid`) são ignorados.
+States in the `notifications` table: `pending`, `sent`, `superseded` (replaced by a newer state of the same game),
+`expired` (the game stopped being on sale before sending; revalidated against `deal_state` before sending) and
+`failed`. None is silently deleted, but **not every enqueued notification reaches the channel**: `superseded`,
+`expired` and `failed` ones are only recorded in the database. An `expired` row is not reactivated when the game returns:
+going off sale and on sale again increases `sale_epoch`, so the return is a new promotion and gets a **new**
+notification row (see the known limitation below).
 
-## Testes
+**Risk:** if the process dies (or the write fails) exactly between a successful `send()` and the `UPDATE ... sent`, the
+same notification is sent again after restart. A duplicate is possible; a notification never disappears without a
+record, but the guarantees above (superseded/expired/failed) mean there is no guaranteed delivery of every observed
+promotion.
+
+## Real limitations of the Steam APIs
+
+- The endpoints used are **not officially documented** and may change without notice (search, `GetItems`,
+  `GetWishlist`, `search/suggest`, `appdetails`).
+- The offers search returns **HTML inside JSON**: the parser is fragile by nature. A page with no rows while
+  `total_count > 0` raises `SteamSchemaError` (the source fails visibly, without notifying wrong data).
+- **Private and empty wishlists are indistinguishable** (`{"response":{}}` in both cases). The bot explains this to
+  the user and, in that case, **does not erase** already imported games (use `/steam_desvincular` to clear them).
+- The **end date of an offer** only comes from `GetItems`; the offers search does not report it.
+- `GetItems`: batch of **100 AppIDs** adopted. In testing, 500 returned HTTP 400, 200 worked and POST returns 405.
+- **Undocumented rate limits**: during validation the paginated search received HTTP 429 without a `Retry-After`
+  header. The client uses exponential backoff with jitter, honours `Retry-After` when present and pauses 3 s between
+  pages (with 1.6 s/page the 429 appeared after ~26 pages; with 3 s the 67 pages passed without a 429). If a page
+  stays rate limited, the client pauses 60 s and retries (twice) before failing the source, which is retried on the
+  next cycle. `count` above 100 is ignored by Steam.
+- **Custom (vanity, `/id/name`) URLs are not supported** (resolving them would require an API key).
+- `category1=998` restricts the search to base games: in real validation the total dropped from 9906 to 6592 items
+  and the 100-item sample contained only `type=0` (no DLC, which appeared as `type=4` without the filter).
+- The default search order (relevance) is **unstable during pagination**: in one full cycle there were 210 duplicate
+  rows and about 210 missing games, which would cause false "new" games on the next cycle (137 spurious notifications
+  in validation). That is why the search uses `sort_by=Name_ASC`: 6570 unique games, 0 duplicates.
+- Games that go on sale as a package/bundle (`data-ds-bundleid`/`packageid`) are ignored.
+
+## Tests
 
 ```powershell
 .venv\Scripts\python -m pytest -q
 ```
 
-Os testes não usam rede: o HTTP é substituído por fakes injetados e as respostas vêm de amostras reais em
-`tests/fixtures` (busca, `GetItems`, wishlist pública/privada, sugestões).
+The tests do not use the network: HTTP is replaced by injected fakes and the responses come from real samples in
+`tests/fixtures` (search, `GetItems`, public/private wishlist, suggestions). A fixture blocks any real network access.
 
-Validação manual contra a Steam real (somente leitura, sem Discord):
+Manual validation against the real Steam (read-only, no Discord):
 
 ```powershell
 .venv\Scripts\python scripts\smoke_steam.py [SteamID64]
 ```
 
-### O que foi verificado
+Full real cycles (uses a temporary database and a fake sender, never touches `data/` and never connects to Discord;
+each cycle takes about 4 minutes, so keep the default of 2 consecutive cycles to be polite to Steam):
 
-| Item | Testado automaticamente | Validado com chamadas reais (Steam) | NÃO validado (Discord) |
+```powershell
+.venv\Scripts\python scripts\validate_cycle.py [--cycles 2] [--wishlist-limit 150] [--steam-id <SteamID64>]
+```
+
+It links one test user to a public SteamID64 and caps the imported wishlist (default 150 AppIDs) to avoid hundreds of
+price lookups per cycle. It prints, per cycle: duration per source, real requests per endpoint, 429s, retries, time
+spent in backoff, pages, parsed items against `total_count`, duplicates, discarded rows, items without a price, price
+integrity checks, event loop lag and the notifications created (with the reason for each). Cycle 1 shows the
+baseline behaviour; cycle 2 shows whether anything is announced again without a real change.
+
+### What was verified
+
+| Item | Tested automatically | Validated with real calls (Steam) | NOT validated (Discord) |
 | --- | --- | --- | --- |
-| Parse da busca de ofertas, bundles, HTML alterado | Sim (fixture real) | Sim (1 página, `category1=998`) | n/a |
-| `GetItems`, itens sem preço, lotes, fallback | Sim | Sim (lote de 100; 500 = HTTP 400; POST = 405) | n/a |
-| Wishlist pública/privada, SteamID | Sim | Sim (wishlist pública de teste) | n/a |
-| Sugestões/autocomplete (parser, cache) | Sim | Sim (`portal`) | Autocomplete real no cliente Discord |
-| Retry, backoff, `Retry-After`, timeout | Sim | 429 observado na busca paginada | n/a |
-| Banco: migrações, FKs, UNIQUE, reinício | Sim | n/a | n/a |
-| Detecção, dedupe, baseline, fila, superseded | Sim | Ciclo completo com Steam real e envio simulado | n/a |
-| Comandos slash e permissões | Sim (objetos `Interaction` falsos) | n/a | **Não validado** em um servidor Discord real |
-| Envio de embed/menções, `allowed_mentions` | Sim (canal falso) | n/a | **Não validado** no Discord real |
-| Sincronização de comandos, loop, login do bot | Construção do bot testada | n/a | **Não validado** (requer token e servidor) |
+| Offers search parsing, bundles, changed HTML | Yes (real fixture) | Yes (full pagination, `category1=998`) | n/a |
+| `GetItems`, items without a price, batches, fallback | Yes | Yes (batch of 100; 500 = HTTP 400; POST = 405) | n/a |
+| Public/private wishlist, SteamID | Yes | Yes (public test wishlist) | n/a |
+| Suggestions/autocomplete (parser, cache) | Yes | Yes (`portal`) | Real autocomplete in the Discord client |
+| Retry, backoff, `Retry-After`, timeout | Yes | 429 observed in the paginated search | n/a |
+| Database: migrations (including the signature migration), FKs, UNIQUE, restart | Yes | n/a | n/a |
+| Detection, dedupe, `discount_end` handling, baseline, queue, superseded | Yes | Full cycles with the real Steam and a fake sender (`scripts/validate_cycle.py`) | n/a |
+| Coverage/absence heuristics (90% of `total_count`, 50% collapse, 2 missing cycles) | Yes (simulated incomplete listings) | Measured on real full listings | n/a |
+| Wishlist empty/private/unavailable outcomes and user messages | Yes | Public wishlist only | n/a |
+| Slash commands and permissions | Yes (fake `Interaction` objects) | n/a | **Not validated** on a real Discord server |
+| Embed/mention sending, `allowed_mentions` | Yes (fake channel) | n/a | **Not validated** on real Discord |
+| Command sync, loop, bot login, channel permissions | Bot construction, setup and shutdown tested | n/a | **Not validated** (requires a token and a server) |
 
-Os testes com Discord usam objetos falsos: o comportamento real da API do Discord (permissões, limites de rate,
-renderização dos embeds e menções) ainda precisa ser conferido manualmente em um servidor de teste.
+The Discord tests use fake objects: the real Discord API behaviour (permissions, rate limits, embed and mention
+rendering) still has to be checked manually on a test server.
