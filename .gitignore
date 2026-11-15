@@ -1,0 +1,26 @@
+# Secrets and local data
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Logs / IDE
+*.log
+logs/
+.vscode/
+.idea/
+graphify-out/
