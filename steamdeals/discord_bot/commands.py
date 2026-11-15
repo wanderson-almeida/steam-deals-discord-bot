@@ -138,6 +138,11 @@ class SteamCommands:
                 "públicos em Steam > Perfil > Editar perfil > Configurações de privacidade e tente de novo. "
                 "Os jogos que você já monitorava foram mantidos."
             )
+        if result.status == "invalid_id":
+            return (
+                "A Steam recusou esse SteamID64 (ele não existe ou é inválido). Confira o ID e vincule de novo "
+                "com `/steam_vincular`."
+            )
         if result.status == "not_linked":
             return NOT_LINKED_MESSAGE
         return "Não foi possível consultar a Steam agora. Tente novamente em alguns minutos."
@@ -172,11 +177,17 @@ class SteamCommands:
         embed.add_field(name="Jogos monitorados", value=str(counts["monitored"]), inline=True)
         embed.add_field(name="Ofertas no banco", value=str(counts["on_sale"]), inline=True)
         nxt = self.next_cycle()
-        embed.add_field(
-            name="Próximo ciclo",
-            value=f"<t:{int(nxt.timestamp())}:R>" if nxt else f"a cada {self.interval_minutes} min",
-            inline=True,
-        )
+        if nxt and nxt.timestamp() > time.time():
+            next_text = f"<t:{int(nxt.timestamp())}:R>"
+        elif getattr(self.monitor, "running", False):
+            # The loop schedules the next iteration when a cycle starts: a cycle longer than
+            # the interval leaves that moment in the past.
+            next_text = "ciclo em andamento"
+        elif nxt:
+            next_text = f"<t:{int(nxt.timestamp())}:R>"
+        else:
+            next_text = f"a cada {self.interval_minutes} min"
+        embed.add_field(name="Próximo ciclo", value=next_text, inline=True)
         summary = self.monitor.last_summary
         if admin and summary is not None and summary.errors:
             embed.add_field(

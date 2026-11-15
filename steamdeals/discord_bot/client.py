@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -15,6 +16,11 @@ from ..notify.embeds import build_embed, build_mentions
 from .commands import SteamCommands, register_commands
 
 log = logging.getLogger(__name__)
+
+# A full cycle takes about 4 minutes (paginated specials, 3 s between pages). The loop waits for
+# a cycle to finish before starting the next iteration, so a shorter interval makes cycles run
+# back to back and keeps hitting Steam continuously.
+MIN_RECOMMENDED_INTERVAL_MINUTES = 10
 
 
 class SteamDealsBot(discord.Client):
@@ -50,11 +56,22 @@ class SteamDealsBot(discord.Client):
             log.info("Synced %d slash commands", len(synced))
         except discord.HTTPException as exc:
             log.error("Slash command sync failed: HTTP %s", exc.status)
+        if self.settings.check_interval_minutes < MIN_RECOMMENDED_INTERVAL_MINUTES:
+            log.warning(
+                "CHECK_INTERVAL_MINUTES=%d is shorter than a full cycle (~4 min) plus margin; "
+                "cycles will run back to back. Values below %d are meant for short tests only.",
+                self.settings.check_interval_minutes, MIN_RECOMMENDED_INTERVAL_MINUTES,
+            )
         self._cycle_loop.start()
 
     async def close(self) -> None:
+        # Wait for the cancelled cycle to unwind (rolling back an open transaction) before the
+        # database and the HTTP session it is using are closed.
+        task = self._cycle_loop.get_task()
         if self._cycle_loop.is_running():
             self._cycle_loop.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
         if self.services is not None:
             await self.services.close()
             self.services = None
