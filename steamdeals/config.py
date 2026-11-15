@@ -31,6 +31,7 @@ class Settings:
     check_interval_minutes: int = 30
     max_concurrency: int = 5
     max_notifications_per_cycle: int = 20
+    manual_check_cooldown_seconds: int = 300
     include_non_games: bool = False
     database_path: str = "data/steamdeals.db"
     steam_country: str = "br"
@@ -107,6 +108,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     interval = _parse_int(env, "CHECK_INTERVAL_MINUTES", 30, errors, minimum=1, maximum=1440)
     concurrency = _parse_int(env, "MAX_CONCURRENCY", 5, errors, minimum=1, maximum=20)
     per_cycle = _parse_int(env, "MAX_NOTIFICATIONS_PER_CYCLE", 20, errors, minimum=1, maximum=100)
+    manual_cooldown = _parse_int(env, "MANUAL_CHECK_COOLDOWN_SECONDS", 300, errors, minimum=0, maximum=86400)
     include_non_games = _parse_bool(env, "INCLUDE_NON_GAMES", False, errors)
 
     country = (_get(env, "STEAM_COUNTRY") or "br").lower()
@@ -131,6 +133,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         check_interval_minutes=interval,
         max_concurrency=concurrency,
         max_notifications_per_cycle=per_cycle,
+        manual_check_cooldown_seconds=manual_cooldown,
         include_non_games=include_non_games,
         database_path=_get(env, "DATABASE_PATH") or "data/steamdeals.db",
         steam_country=country,
