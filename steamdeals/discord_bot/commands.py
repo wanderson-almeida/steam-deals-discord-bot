@@ -2,7 +2,8 @@
 
 User commands are open to everyone in the guild; each user can only change
 their own data. ``/steam_status`` is open too, but internal error details are
-shown only to members with the ``manage_guild`` permission. All replies are
+shown only to members with the ``manage_guild`` permission, which is also the permission
+required by ``/steam_verificar`` (manual check). All replies are
 ephemeral; only promotion notifications are public.
 
 The command logic lives in :class:`SteamCommands` (plain async methods that
@@ -95,6 +96,7 @@ class SteamCommands:
         next_cycle: Callable[[], datetime | None] = lambda: None,
         interval_minutes: int = 30,
         clock: Callable[[], float] = time.monotonic,
+        manual_check=None,
     ) -> None:
         self.repo = repo
         self.monitor = monitor
@@ -104,6 +106,7 @@ class SteamCommands:
         self.interval_minutes = interval_minutes
         self.clock = clock
         self._import_times: dict[int, float] = {}
+        self.manual_check = manual_check
 
     # ----------------------------------------------------------------- utils
     @staticmethod
@@ -195,7 +198,76 @@ class SteamCommands:
                 value=_clean(", ".join(summary.errors[:10]), 500),
                 inline=False,
             )
+        last = self.manual_check.last_result if self.manual_check is not None else None
+        if admin and last is not None:
+            when = int((last.finished_at or last.started_at).timestamp())
+            if last.status != "ok":
+                outcome = "falhou"
+            elif last.errors or not last.specials_ok:
+                outcome = "concluída com falhas"
+            else:
+                outcome = "concluída"
+            text = (
+                f"<@{last.user_id}> <t:{when}:R>: {outcome} em {last.duration:.0f}s, "
+                f"{last.enqueued} geradas, {last.dispatched} enviadas"
+            )
+            if last.errors:
+                text += f", falhas: {_clean(', '.join(last.errors[:5]), 200)}"
+            embed.add_field(name="Última verificação manual", value=text, inline=False)
         await self._reply(interaction, embed=embed)
+
+    async def steam_verificar(self, interaction) -> None:
+        """Admin only: run a monitoring cycle now, in the background."""
+        if not _is_admin(interaction):
+            await self._reply(
+                interaction, "Apenas membros com a permissão **Gerenciar Servidor** podem usar este comando."
+            )
+            return
+        if self.manual_check is None:
+            await self._reply(interaction, "A verificação manual não está disponível.")
+            return
+
+        async def deliver(result) -> None:
+            await interaction.followup.send(**_kwargs(self._manual_result_message(result), None))
+
+        outcome = self.manual_check.request(interaction.user.id, deliver)
+        if outcome.status == "running":
+            await self._reply(interaction, "Já existe uma verificação em andamento. Aguarde ela terminar.")
+        elif outcome.status == "closing":
+            await self._reply(interaction, "O bot está encerrando; tente novamente depois que ele voltar.")
+        elif outcome.status == "cooldown":
+            await self._reply(
+                interaction, f"Aguarde {outcome.remaining}s antes de pedir outra verificação manual."
+            )
+        else:
+            await self._reply(
+                interaction,
+                "Verificação iniciada. Ela leva cerca de 4 minutos; envio o resultado aqui quando terminar "
+                "(só você vê).",
+            )
+
+    @staticmethod
+    def _manual_result_message(result) -> str:
+        if result.status == "skipped":
+            return "Um ciclo agendado já estava em andamento; nenhuma nova verificação foi iniciada."
+        if result.status == "failed":
+            return "A verificação falhou por um erro interno. Veja os logs do bot."
+        failures = ", ".join(result.errors[:10]) if result.errors else "nenhuma"
+        partial = bool(result.errors) or not result.specials_ok
+        offers = str(result.specials_count) if result.specials_ok else "falhou"
+        monitored = str(result.monitored)
+        if result.store_failed:
+            monitored += f" ({result.store_failed} sem preço/falha)"
+        lines = [
+            f"Verificação concluída{' com falhas' if partial else ''} em {result.duration:.0f}s.",
+            f"Ofertas: {offers}",
+            f"Monitorados: {monitored}",
+            f"Notificações: {result.enqueued} geradas, {result.dispatched} enviadas.",
+        ]
+        if result.wishlists_failed:
+            lines.append(f"Wishlists com falha: {result.wishlists_failed}")
+        lines.append(f"Falhas: {_clean(failures, 500)}")
+        return "\n".join(lines)
 
     async def steam_vincular(self, interaction, steam_id: str) -> None:
         try:
@@ -371,6 +443,12 @@ def register_commands(tree: app_commands.CommandTree, handlers: SteamCommands) -
     @app_commands.guild_only()
     async def steam_status(interaction: discord.Interaction):
         await handlers.steam_status(interaction)
+
+    @tree.command(name="steam_verificar", description="(Admin) Executa uma verificação de ofertas agora")
+    @app_commands.guild_only()
+    @app_commands.default_permissions(manage_guild=True)  # UX only: the handler is the real guard
+    async def steam_verificar(interaction: discord.Interaction):
+        await handlers.steam_verificar(interaction)
 
     @tree.command(name="steam_vincular", description="Vincula sua conta Steam para monitorar sua wishlist")
     @app_commands.describe(steam_id="SteamID64 (17 dígitos) ou URL steamcommunity.com/profiles/<id>")

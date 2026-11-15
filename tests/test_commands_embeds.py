@@ -112,12 +112,12 @@ def cmds(repo, env, clock):
 
 
 # ----------------------------------------------------------------- registration
-def test_eight_guild_only_commands_registered_with_autocomplete():
+def test_nine_guild_only_commands_registered_with_autocomplete():
     tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
     register_commands(tree, object())  # handlers are only called on invocation
     commands = {c.name: c for c in tree.get_commands()}
     assert set(commands) == {
-        "steam_status", "steam_vincular", "steam_desvincular", "wishlist",
+        "steam_status", "steam_verificar", "steam_vincular", "steam_desvincular", "wishlist",
         "wishlist_add", "wishlist_remover", "wishlist_importar", "steam_ofertas",
     }
     assert all(c.guild_only for c in commands.values())

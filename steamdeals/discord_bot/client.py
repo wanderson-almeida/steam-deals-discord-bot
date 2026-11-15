@@ -14,6 +14,7 @@ from ..config import Settings
 from ..notify.dispatcher import ChannelUnavailable
 from ..notify.embeds import build_embed, build_mentions
 from .commands import SteamCommands, register_commands
+from .manual_check import ManualCheck
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class SteamDealsBot(discord.Client):
         self.settings = settings
         self.tree = app_commands.CommandTree(self)
         self.services: Services | None = None
+        self.manual_check: ManualCheck | None = None
         self._cycle_loop = tasks.loop(minutes=settings.check_interval_minutes)(self._run_cycle)
         self._cycle_loop.before_loop(self._before_cycle)
         self.tree.error(self._on_command_error)
@@ -37,6 +39,7 @@ class SteamDealsBot(discord.Client):
     # ------------------------------------------------------------- lifecycle
     async def setup_hook(self) -> None:
         self.services = await Services.create(self.settings, self.send_notification)
+        self.manual_check = ManualCheck(self.services.monitor, self.settings.manual_check_cooldown_seconds)
         handlers = SteamCommands(
             self.services.repo,
             self.services.monitor,
@@ -44,6 +47,7 @@ class SteamDealsBot(discord.Client):
             self.services.suggest,
             next_cycle=lambda: self._cycle_loop.next_iteration,
             interval_minutes=self.settings.check_interval_minutes,
+            manual_check=self.manual_check,
         )
         register_commands(self.tree, handlers)
         try:
@@ -67,11 +71,15 @@ class SteamDealsBot(discord.Client):
     async def close(self) -> None:
         # Wait for the cancelled cycle to unwind (rolling back an open transaction) before the
         # database and the HTTP session it is using are closed.
+        if self.manual_check is not None:
+            self.manual_check.begin_close()  # no new manual cycle may start while shutting down
         task = self._cycle_loop.get_task()
         if self._cycle_loop.is_running():
             self._cycle_loop.cancel()
         if task is not None:
             await asyncio.gather(task, return_exceptions=True)
+        if self.manual_check is not None:
+            await self.manual_check.shutdown()
         if self.services is not None:
             await self.services.close()
             self.services = None
