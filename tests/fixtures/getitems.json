@@ -1,0 +1,308 @@
+{
+ "response": {
+  "store_items": [
+   {
+    "item_type": 0,
+    "id": 227300,
+    "success": 1,
+    "visible": true,
+    "name": "Euro Truck Simulator 2",
+    "store_url_path": "app/227300/Euro_Truck_Simulator_2",
+    "store_url_slug": "Euro_Truck_Simulator_2",
+    "appid": 227300,
+    "type": 0,
+    "related_items": {
+     "demo_appid": [
+      231120
+     ],
+     "demos": [
+      {
+       "appid": 231120,
+       "show_above_purchase": true
+      }
+     ]
+    },
+    "categories": {
+     "supported_player_categoryids": [
+      2,
+      1,
+      9,
+      38
+     ],
+     "feature_categoryids": [
+      22,
+      29,
+      30,
+      67,
+      68,
+      69,
+      70,
+      74,
+      75,
+      78,
+      79,
+      23,
+      17,
+      41,
+      42,
+      44,
+      62
+     ],
+     "controller_categoryids": [
+      59,
+      18
+     ]
+    },
+    "basic_info": {
+     "short_description": "Viaje pela Europa como o rei da estrada, um caminhoneiro que entrega cargas impo",
+     "publishers": [
+      {
+       "name": "SCS Software",
+       "creator_clan_account_id": 4036972
+      }
+     ],
+     "developers": [
+      {
+       "name": "SCS Software",
+       "creator_clan_account_id": 4036972
+      }
+     ],
+     "capsule_headline": "#msg_new_content_now_available"
+    },
+    "best_purchase_option": {
+     "packageid": 19007,
+     "purchase_option_name": "Euro Truck Simulator 2",
+     "final_price_in_cents": "1674",
+     "original_price_in_cents": "6699",
+     "formatted_final_price": "R$16,74",
+     "formatted_original_price": "R$66,99",
+     "discount_pct": 75,
+     "active_discounts": [
+      {
+       "discount_amount": "5025",
+       "discount_description": "#discount_desc_preset_special",
+       "discount_end_date": 1795539600
+      }
+     ],
+     "user_can_purchase_as_gift": true,
+     "hide_discount_pct_for_compliance": false,
+     "included_game_count": 1,
+     "must_purchase_as_set": false,
+     "package_group": "default",
+     "price_cannot_be_displayed_as_discount": false
+    }
+   },
+   {
+    "item_type": 0,
+    "id": 2406770,
+    "success": 1,
+    "visible": true,
+    "name": "Bodycam",
+    "store_url_path": "app/2406770/Bodycam",
+    "store_url_slug": "Bodycam",
+    "appid": 2406770,
+    "type": 0,
+    "is_early_access": true,
+    "related_items": {
+     "playtests": [
+      {
+       "appid": 2746700
+      }
+     ]
+    },
+    "content_descriptorids": [
+     2,
+     5
+    ],
+    "categories": {
+     "supported_player_categoryids": [
+      1,
+      49,
+      36
+     ],
+     "feature_categoryids": [
+      22,
+      35,
+      23,
+      15,
+      25,
+      62
+     ],
+     "controller_categoryids": [
+      28,
+      57,
+      59
+     ]
+    },
+    "basic_info": {
+     "short_description": "Bodycam é o primeiro FPS multijogador tático com uma visão real da câmera corpor",
+     "publishers": [
+      {
+       "name": "Reissad",
+       "creator_clan_account_id": 46061319
+      }
+     ],
+     "developers": [
+      {
+       "name": "Reissad",
+       "creator_clan_account_id": 46061319
+      }
+     ],
+     "franchises": [
+      {
+       "name": "Bodycam"
+      }
+     ]
+    },
+    "best_purchase_option": {
+     "packageid": 866042,
+     "purchase_option_name": "Bodycam",
+     "final_price_in_cents": "8159",
+     "original_price_in_cents": "10199",
+     "formatted_final_price": "R$81,59",
+     "formatted_original_price": "R$101,99",
+     "discount_pct": 20,
+     "active_discounts": [
+      {
+       "discount_amount": "2040",
+       "discount_description": "#discount_desc_preset_special",
+       "discount_end_date": 1795208400
+      }
+     ],
+     "user_can_purchase_as_gift": true,
+     "hide_discount_pct_for_compliance": false,
+     "included_game_count": 1,
+     "must_purchase_as_set": false,
+     "package_group": "default",
+     "price_cannot_be_displayed_as_discount": false
+    }
+   },
+   {
+    "item_type": 0,
+    "id": 440,
+    "success": 1,
+    "visible": true,
+    "name": "Team Fortress 2",
+    "store_url_path": "app/440/Team_Fortress_2",
+    "store_url_slug": "Team_Fortress_2",
+    "appid": 440,
+    "type": 0,
+    "is_free": true,
+    "categories": {
+     "supported_player_categoryids": [
+      1,
+      27
+     ],
+     "feature_categoryids": [
+      22,
+      29,
+      13,
+      30,
+      35,
+      66,
+      67,
+      68,
+      69,
+      70,
+      8,
+      15,
+      17,
+      14,
+      41,
+      42
+     ],
+     "controller_categoryids": [
+      18
+     ]
+    },
+    "basic_info": {
+     "short_description": "Nove classes distintas fornecem uma ampla gama de habilidades táticas e personal",
+     "publishers": [
+      {
+       "name": "Valve",
+       "creator_clan_account_id": 4
+      }
+     ],
+     "developers": [
+      {
+       "name": "Valve",
+       "creator_clan_account_id": 4
+      }
+     ],
+     "capsule_headline": "Just Updated!"
+    }
+   },
+   {
+    "item_type": 0,
+    "id": 1091500,
+    "success": 1,
+    "visible": true,
+    "name": "Cyberpunk 2077",
+    "store_url_path": "app/1091500/Cyberpunk_2077",
+    "store_url_slug": "Cyberpunk_2077",
+    "appid": 1091500,
+    "type": 0,
+    "content_descriptorids": [
+     1,
+     2,
+     5
+    ],
+    "categories": {
+     "supported_player_categoryids": [
+      2
+     ],
+     "feature_categoryids": [
+      22,
+      29,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      74,
+      78,
+      79,
+      23,
+      61,
+      62
+     ],
+     "controller_categoryids": [
+      28,
+      55,
+      57,
+      58
+     ]
+    },
+    "basic_info": {
+     "short_description": "Cyberpunk 2077 é um RPG de ação e aventura em mundo aberto que se passa em Night",
+     "publishers": [
+      {
+       "name": "CD PROJEKT RED",
+       "creator_clan_account_id": 32989758
+      }
+     ],
+     "developers": [
+      {
+       "name": "CD PROJEKT RED",
+       "creator_clan_account_id": 32989758
+      }
+     ]
+    },
+    "best_purchase_option": {
+     "packageid": 367653,
+     "purchase_option_name": "Cyberpunk 2077",
+     "final_price_in_cents": "19990",
+     "formatted_final_price": "R$199,90",
+     "user_can_purchase_as_gift": true,
+     "hide_discount_pct_for_compliance": false,
+     "included_game_count": 1,
+     "must_purchase_as_set": false,
+     "package_group": "default",
+     "price_cannot_be_displayed_as_discount": false
+    }
+   }
+  ]
+ }
+}
