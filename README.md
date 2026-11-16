@@ -91,7 +91,7 @@ notifications are public. Each user can only change their own data.
 | `/wishlist_add appid` | Adds a game manually (autocomplete by name or numeric AppID; validated against Steam). Limit of 100 manual games per user; AppID up to 2^31-1. |
 | `/wishlist_remover appid` | Removes a game from the manual list (autocomplete over your own manual games). |
 | `/wishlist_importar` | Re-imports the linked wishlist now (120 s minimum interval per user). |
-| `/steam_ofertas [quantidade]` | Biggest discounts recorded in the database (1 to 15, default 10). |
+| `/steam_ofertas` | The 50 most relevant offers recorded in the database (no parameters), ranked by reviews, quality and discount (see "Offers ranking"). One embed per game (image, original/discounted price, discount, end date when known, reviews), 5 games per page, 10 pages, **Anterior**/**Próxima** buttons usable only by the author (disabled after 180 s). Ephemeral. |
 
 ## Architecture
 
@@ -109,6 +109,7 @@ steamdeals/
   discord_bot/              client.py (loop, sync, sending), commands.py (slash commands)
 scripts/smoke_steam.py      manual validation against the real Steam (no Discord)
 scripts/validate_cycle.py   full real cycles with a temporary database and a fake sender
+scripts/rank_preview.py     one real cycle + offers ranking preview, embed size checks (temporary database)
 tests/                      pytest (no network)
 ```
 
@@ -191,6 +192,47 @@ Note: the offers search does not report the end date. The end date only comes fr
   **not** rejected by Steam: it answers `{"response":{}}`, so it is reported as `empty_or_private`.
 - `error`: temporary failure (HTTP 429/5xx, timeout, network error) or a malformed response. Sources are **kept**, the
   failure is never reported as "private", and the next cycle retries.
+
+### Offers ranking (`/steam_ofertas`)
+
+The ranking is presentation only: it never changes what is monitored or notified. Games on sale are ordered by
+
+```
+score = 100 * (0.60 * recognition + 0.25 * quality + 0.15 * discount)
+recognition = min(1, log10(n + 1) / 6)            n = review count (1,000,000 reviews saturate it)
+quality     = clamp((adj - 0.5) / 0.5, 0, 1)      adj = (p * n + 0.70 * 100) / (n + 100), p = % positive / 100
+discount    = discount % / 100
+```
+
+There is no minimum number of reviews nor minimum positive percentage. A game without reviews has recognition 0 and
+quality 0 (so it ranks lower, but stays eligible); the quality term pulls small samples towards a 70% prior. Ties are
+broken by larger discount, then lower final price, then lower AppID. The weights, scale, prior and formula live in
+`steamdeals/ranking.py` as pure functions (`score_components` explains a position). A 95% discount with no reviews
+(score 14.3) ranks below a 20% discount on a game with 500k reviews at 90% positive (score about 80).
+
+**Review cache (schema v4).** Table `game_reviews(appid, review_count, percent_positive, source, updated_at)`
+stores the latest summary per game, captured **without extra requests** from responses the cycle already downloads:
+
+- `browse`: `GetItems` (monitored games) now sends `include_reviews: true` and reads
+  `reviews.summary_filtered.{review_count, percent_positive}` (falling back to `summary_unfiltered`). A batch of 100
+  AppIDs keeps working (validated live).
+- `search`: the review tooltip of each row of the specials listing (`search_review_summary`, tolerant to thousands
+  separators). A tooltip with an extra paragraph (a language-based or filtered summary) is kept using the figures of
+  its first paragraph but stored as `search_partial`: those counts are **partial, under-estimated** (one live row
+  showed 6,707 reviews against 767,416 in `GetItems`). A partial figure still gives a known game some recognition,
+  which is better than none.
+
+Precedence, best first: `browse` > `search` > `search_partial`. `browse` always replaces; `search` replaces `search`
+or `search_partial` (and a `browse` value only when it is older than 7 days); `search_partial` only replaces
+`search_partial`, never a complete or structured value. Games that show no summary (Steam hides it with very few
+reviews) keep their previous value. A failure while storing reviews is logged (and listed in the cycle errors) but
+never affects detection or notifications. Migration 4 is idempotent and transactional like the others.
+
+**Limitations.** Many offers have no review summary in the live catalogue, so they rank low (see the numbers in
+`scripts/rank_preview.py`); search counts with an extra paragraph are partial/under-estimated, and only monitored
+games (wishlist or manual list) get the structured `GetItems` data; the tooltip text is localised (parsed by shape,
+not by words); the cache only fills after a cycle has run (the command says so when it is completely empty and then
+ranks by discount and price); the ranking uses stored data, no request is made when the command runs.
 
 ### Manual check (`/steam_verificar`)
 
@@ -302,6 +344,7 @@ baseline behaviour; cycle 2 shows whether anything is announced again without a 
 | Suggestions/autocomplete (parser, cache) | Yes | Yes (`portal`) | Real autocomplete in the Discord client |
 | Retry, backoff, `Retry-After`, timeout | Yes | 429 observed in the paginated search | n/a |
 | Database: migrations (including the signature migration), FKs, UNIQUE, restart | Yes | n/a | n/a |
+| Review parsing (tooltip, GetItems), schema v4, cache precedence, ranking and `/steam_ofertas` pagination | Yes | Full catalogue (`scripts/rank_preview.py`); `browse` x `search` cross-check on 100 games | Real buttons/embeds rendering in Discord |
 | Detection, dedupe, `discount_end` handling, baseline, queue, superseded | Yes | Full cycles with the real Steam and a fake sender (`scripts/validate_cycle.py`) | n/a |
 | Coverage/absence heuristics (90% of `total_count`, 50% collapse, 2 missing cycles) | Yes (simulated incomplete listings) | Measured on real full listings | n/a |
 | Wishlist empty/private/unavailable outcomes and user messages | Yes | Public wishlist only | n/a |
