@@ -174,6 +174,18 @@ MIGRATIONS: list[tuple[int, Migration]] = [
         """,
     ),
     (3, _migrate_signatures_without_end_date),
+    (
+        4,
+        """
+        CREATE TABLE IF NOT EXISTS game_reviews (
+            appid INTEGER PRIMARY KEY,
+            review_count INTEGER NOT NULL CHECK (review_count >= 0),
+            percent_positive INTEGER NOT NULL CHECK (percent_positive BETWEEN 0 AND 100),
+            source TEXT NOT NULL CHECK (source IN ('browse', 'search', 'search_partial')),
+            updated_at INTEGER NOT NULL
+        );
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

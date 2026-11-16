@@ -104,7 +104,7 @@ async def test_failure_in_the_middle_of_v3_rolls_back_and_keeps_schema_version(t
     monkeypatch.undo()
     db = await Database(path).connect()  # a later start applies v3 normally
     await db.close()
-    assert await schema_versions(path) == [1, 2, 3]
+    assert await schema_versions(path) == list(range(1, migrations.LATEST_VERSION + 1))
 
 
 async def test_full_upgrade_from_v1_to_latest(tmp_path, monkeypatch):
@@ -121,7 +121,7 @@ async def test_full_upgrade_from_v1_to_latest(tmp_path, monkeypatch):
     await conn.close()
     db = await Database(path).connect()
     try:
-        assert await migrations.current_version(db.conn) == migrations.LATEST_VERSION == 3
+        assert await migrations.current_version(db.conn) == migrations.LATEST_VERSION
         state = (await Repository(db).get_deal_states())[7]
         assert state["missing_cycles"] == 0 and state["last_signature"] != "old"
     finally:
@@ -139,4 +139,4 @@ async def test_reopening_a_database_already_at_latest_is_idempotent(tmp_path):
         assert await Repository(second).get_deal_states() == before
     finally:
         await second.close()
-    assert await schema_versions(path) == [1, 2, 3]
+    assert await schema_versions(path) == list(range(1, migrations.LATEST_VERSION + 1))

@@ -6,11 +6,14 @@ import json
 from datetime import datetime, timezone
 from typing import Callable, Iterable
 
+from .. import ranking
 from ..models import CycleChanges, DealSnapshot, NewNotification
 from .database import Database
 
 BASELINE_SETTING = "specials_baseline_done"
 MAX_SEND_ATTEMPTS = 5
+# A 'browse' (GetItems) review summary is only replaced by a 'search' one after this long.
+BROWSE_REVIEW_TTL_SECONDS = 7 * 24 * 3600
 
 
 def utc_now() -> datetime:
@@ -262,6 +265,61 @@ class Repository:
                 (limit,),
             ) as cur:
                 return [dict(r) for r in await cur.fetchall()]
+
+    # --------------------------------------------------------------- reviews
+    async def upsert_reviews(self, rows: Iterable[tuple[int, int, int, str]]) -> int:
+        """Store ``(appid, review_count, percent_positive, source)`` rows in one short transaction.
+
+        Sources, best first: 'browse' (GetItems), 'search' (complete tooltip) and 'search_partial'
+        (tooltip with extra paragraphs: an under-estimate). 'browse' always replaces; 'search'
+        replaces 'search' or 'search_partial', and a 'browse' row only when older than
+        ``BROWSE_REVIEW_TTL_SECONDS``; 'search_partial' only replaces 'search_partial'.
+        Returns the number of rows offered (not necessarily changed)."""
+        rows = list(rows)
+        if not rows:
+            return 0
+        now = int(self._clock().timestamp())
+        cutoff = now - BROWSE_REVIEW_TTL_SECONDS
+        async with self.db.transaction() as c:
+            await c.executemany(
+                "INSERT INTO game_reviews (appid, review_count, percent_positive, source, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(appid) DO UPDATE SET "
+                "review_count = excluded.review_count, percent_positive = excluded.percent_positive, "
+                "source = excluded.source, updated_at = excluded.updated_at "
+                "WHERE excluded.source = 'browse' "
+                "OR (excluded.source = 'search' AND (game_reviews.source IN ('search', 'search_partial') "
+                "OR game_reviews.updated_at < ?)) "
+                "OR (excluded.source = 'search_partial' AND game_reviews.source = 'search_partial')",
+                [(a, n, p, src, now, cutoff) for a, n, p, src in rows],
+            )
+        return len(rows)
+
+    async def get_reviews(self, appid: int) -> dict | None:
+        async with self.db.read() as c:
+            async with c.execute("SELECT * FROM game_reviews WHERE appid = ?", (appid,)) as cur:
+                row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def reviews_cached(self) -> int:
+        async with self.db.read() as c:
+            async with c.execute("SELECT COUNT(*) FROM game_reviews") as cur:
+                return (await cur.fetchone())[0]
+
+    async def top_ranked_deals(self, limit: int = 50) -> list[dict]:
+        """Games on sale ranked by :mod:`steamdeals.ranking` (reviews, quality, discount).
+
+        Ranking happens in Python over the on-sale rows (a few thousand); games without a
+        cached review summary stay eligible. Deterministic: ties follow ``ranking.sort_key``."""
+        sql = (
+            "SELECT d.appid, d.name, d.final_cents, d.original_cents, d.discount_pct, d.discount_end, "
+            "d.image_url, r.review_count, r.percent_positive, r.source AS review_source "
+            "FROM deal_state d LEFT JOIN game_reviews r ON r.appid = d.appid "
+            "WHERE d.on_sale = 1 AND d.name <> ''"
+        )
+        async with self.db.read() as c:
+            async with c.execute(sql) as cur:
+                rows = [dict(r) for r in await cur.fetchall()]
+        return ranking.rank_deals(rows, limit)
 
     async def price_history(self, appid: int) -> list[dict]:
         async with self.db.read() as c:
