@@ -400,7 +400,7 @@ def test_embed_content():
     assert "R$ 66,99" in fields["Preço original"] and "R$ 16,74" in fields["Preço com desconto"]
     assert fields["Desconto"] == "-75%"
     assert fields["Termina"] == "<t:1795539600:R>"
-    assert fields["Origem"] == "Ofertas especiais"
+    assert fields["Encontrado em"] == "Ofertas especiais"
 
 
 def test_embed_without_end_date_has_no_end_field():
@@ -412,8 +412,8 @@ def test_origin_labels():
     assert origin_label(["specials"]) == "Ofertas especiais"
     assert origin_label(["wishlist"]) == "Wishlist"
     assert origin_label(["manual"]) == "Wishlist"
-    assert origin_label(["specials", "wishlist"]) == "Ambas"
-    assert origin_label(["specials", "manual"]) == "Ambas"
+    assert origin_label(["specials", "wishlist"]) == "Ofertas especiais e wishlist"
+    assert origin_label(["specials", "manual"]) == "Ofertas especiais e wishlist"
 
 
 def test_mentions_limited_to_ten_users_only():

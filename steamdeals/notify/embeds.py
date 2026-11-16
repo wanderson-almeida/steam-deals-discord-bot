@@ -17,7 +17,7 @@ def origin_label(origins: list[str] | set[str]) -> str:
     has_specials = ORIGIN_SPECIALS in origins
     has_watch = bool(origins & {ORIGIN_WISHLIST, ORIGIN_MANUAL})
     if has_specials and has_watch:
-        return "Ambas"
+        return "Ofertas especiais e wishlist"
     if has_watch:
         return "Wishlist"
     return "Ofertas especiais"
@@ -35,7 +35,7 @@ def build_embed(payload: dict) -> discord.Embed:
     end = payload.get("discount_end")
     if end:
         embed.add_field(name="Termina", value=f"<t:{int(end)}:R>", inline=True)
-    embed.add_field(name="Origem", value=origin_label(payload.get("origins", [])), inline=True)
+    embed.add_field(name="Encontrado em", value=origin_label(payload.get("origins", [])), inline=True)
     if payload.get("image_url"):
         embed.set_image(url=payload["image_url"])
     embed.set_footer(text="Steam")
