@@ -123,8 +123,7 @@ def test_nine_guild_only_commands_registered_with_autocomplete():
     assert all(c.guild_only for c in commands.values())
     assert commands["wishlist_add"]._params["appid"].autocomplete is not None
     assert commands["wishlist_remover"]._params["appid"].autocomplete is not None
-    qty = commands["steam_ofertas"]._params["quantidade"]
-    assert (qty.min_value, qty.max_value) == (1, 15) and qty.required is False
+    assert list(commands["steam_ofertas"]._params) == []  # fixed 10 pages, no parameters
     assert [p for p in commands["steam_vincular"]._params] == ["steam_id"]
 
 
@@ -303,30 +302,9 @@ async def test_importar_handles_steam_errors(cmds, repo):
 
 
 # ----------------------------------------------------------------- ofertas
-async def test_ofertas_lists_top_discounts_and_clamps_quantity(cmds, repo):
-    from steamdeals.models import CycleChanges, StateUpdate
-    states = [
-        StateUpdate(DealSnapshot(n, f"Game {n}", 1000, 2000, 10 + n, 1800000000, True), set_signature=True)
-        for n in range(1, 21)
-    ]
-    await repo.apply_cycle(CycleChanges(states=states))
-    i = FakeInteraction(1)
-    await cmds.steam_ofertas(i, 50)
-    lines = i.response.messages[0]["embed"].description.splitlines()
-    assert len(lines) == 15
-    assert "Game 20" in lines[0] and "-30%" in lines[0]  # highest discount first
-    i.assert_all_ephemeral()
-    i = FakeInteraction(1)
-    await cmds.steam_ofertas(i)
-    assert len(i.response.messages[0]["embed"].description.splitlines()) == 10
-    i = FakeInteraction(1)
-    await cmds.steam_ofertas(i, 0)
-    assert len(i.response.messages[0]["embed"].description.splitlines()) == 1
-
-
 async def test_ofertas_empty(cmds):
     i = FakeInteraction(1)
-    await cmds.steam_ofertas(i, 5)
+    await cmds.steam_ofertas(i)
     assert "Ainda não há ofertas" in i.text
 
 

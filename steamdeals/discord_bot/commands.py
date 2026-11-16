@@ -23,13 +23,13 @@ from discord import app_commands
 
 from ..steam.money import format_brl
 from ..steam.wishlist import InvalidSteamId, parse_steam_id
+from .offers import MAX_GAMES, OffersView, build_pages
 
 log = logging.getLogger(__name__)
 
 MAX_LIST_ITEMS = 25
 MAX_MANUAL_GAMES = 100
 IMPORT_COOLDOWN_SECONDS = 120
-MAX_OFFERS = 15
 BLUE = 0x1B2838
 NOT_LINKED_MESSAGE = "Você ainda não vinculou uma conta Steam. Use `/steam_vincular`."
 
@@ -395,23 +395,19 @@ class SteamCommands:
         result = await self.monitor.import_wishlist(user_id)
         await self._followup(interaction, self._import_message(result))
 
-    async def steam_ofertas(self, interaction, quantidade: int = 10) -> None:
-        limit = max(1, min(int(quantidade), MAX_OFFERS))
-        deals = await self.repo.top_deals(limit)
+    async def steam_ofertas(self, interaction) -> None:
+        deals = await self.repo.top_ranked_deals(MAX_GAMES)
         if not deals:
             await self._reply(
                 interaction, "Ainda não há ofertas registradas. Aguarde a primeira verificação do bot."
             )
             return
-        lines = []
-        for d in deals:
-            url = f"https://store.steampowered.com/app/{d['appid']}"
-            lines.append(
-                f"**[{_clean(d['name'], 50)}]({url})** — ~~{format_brl(d['original_cents'])}~~ "
-                f"**{format_brl(d['final_cents'])}** (-{d['discount_pct']}%)"
-            )
-        embed = discord.Embed(title=f"Maiores descontos agora ({len(deals)})", description="\n".join(lines), color=BLUE)
-        await self._reply(interaction, embed=embed)
+        notice = await self.repo.reviews_cached() == 0
+        view = OffersView(interaction.user.id, build_pages(deals), notice=notice)
+        await interaction.response.send_message(
+            content=view.content, embeds=view.embeds, view=view, ephemeral=True
+        )
+        view.interaction = interaction
 
     # ---------------------------------------------------------- autocomplete
     async def autocomplete_suggest(self, interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -491,8 +487,7 @@ def register_commands(tree: app_commands.CommandTree, handlers: SteamCommands) -
     async def wishlist_importar(interaction: discord.Interaction):
         await handlers.wishlist_importar(interaction)
 
-    @tree.command(name="steam_ofertas", description="Mostra as maiores ofertas registradas no momento")
-    @app_commands.describe(quantidade="Quantidade de ofertas (1 a 15)")
+    @tree.command(name="steam_ofertas", description="Mostra as melhores ofertas por relevância, com avaliações")
     @app_commands.guild_only()
-    async def steam_ofertas(interaction: discord.Interaction, quantidade: app_commands.Range[int, 1, MAX_OFFERS] = 10):
-        await handlers.steam_ofertas(interaction, quantidade)
+    async def steam_ofertas(interaction: discord.Interaction):
+        await handlers.steam_ofertas(interaction)
