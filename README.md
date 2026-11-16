@@ -234,6 +234,20 @@ games (wishlist or manual list) get the structured `GetItems` data; the tooltip 
 not by words); the cache only fills after a cycle has run (the command says so when it is completely empty and then
 ranks by discount and price); the ranking uses stored data, no request is made when the command runs.
 
+### Reviews in notification embeds
+
+Every automatic notification (special offers and wishlist/manual games, same embed) has an **Avaliações** field with the
+full pt-BR figure, for example `93% positivas · 125.430 avaliações` (`1 avaliação` in the singular). Without data it
+reads `Avaliações indisponíveis`; a count that came from a search tooltip with extra paragraphs (stored as
+`search_partial`, under-estimated) reads `98% positivas · 6.707 avaliações (contagem parcial)`. This field uses the full
+number, unlike the compact `mil/mi` format of `/steam_ofertas`, which is unchanged.
+
+The data comes **only** from the existing `game_reviews` cache (no extra Steam request): the dispatcher reads it at
+send time, so it uses the latest value written by the cycle (precedence `browse` > `search` > `search_partial`, see
+"Offers ranking"). The reviews are added to a copy of the payload when sending; they are never stored in the queued
+payload and do not take part in the signature or in deduplication. If reading the cache fails, the failure is logged
+and the notification is still sent with `Avaliações indisponíveis`.
+
 ### Manual check (`/steam_verificar`)
 
 The command runs the regular `MonitorService.run_cycle` (same baseline, dedupe, persistent queue, 20-per-cycle limit and
