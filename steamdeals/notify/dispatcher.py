@@ -61,6 +61,17 @@ class NotificationDispatcher:
         self._max = max_per_cycle
         self._lock = asyncio.Lock()
 
+    async def _with_reviews(self, payload: dict) -> dict:
+        """Copy of the payload with the freshest cached review summary (never persisted).
+
+        A failure to read the cache must not stop the notification: it goes out without reviews."""
+        try:
+            reviews = await self._repo.get_reviews(payload["appid"])
+        except Exception:
+            log.exception("Could not read cached reviews for app %s", payload.get("appid"))
+            reviews = None
+        return {**payload, "reviews": reviews}
+
     async def dispatch(self) -> DispatchResult:
         async with self._lock:
             result = DispatchResult()
@@ -70,7 +81,7 @@ class NotificationDispatcher:
             batch = await self._repo.pending_notifications(self._max)
             for row in batch:
                 try:
-                    message_id = await self._send(row["payload"])
+                    message_id = await self._send(await self._with_reviews(row["payload"]))
                 except Exception as exc:
                     result.failed += 1
                     log.warning(

@@ -23,6 +23,30 @@ def origin_label(origins: list[str] | set[str]) -> str:
     return "Ofertas especiais"
 
 
+REVIEWS_UNAVAILABLE = "Avaliações indisponíveis"
+PARTIAL_SOURCE = "search_partial"
+
+
+def format_count_full(n: int) -> str:
+    """Full pt-BR number with a dot as thousands separator: 125430 -> '125.430'."""
+    return f"{max(0, int(n)):,}".replace(",", ".")
+
+
+def reviews_field_text(reviews: dict | None) -> str:
+    """Text of the "Avaliações" field from a cached summary (``review_count``,
+    ``percent_positive``, ``source``); partial (under-estimated) counts are labelled."""
+    if not reviews:
+        return REVIEWS_UNAVAILABLE
+    count, percent = reviews.get("review_count"), reviews.get("percent_positive")
+    if not count or percent is None:
+        return REVIEWS_UNAVAILABLE
+    noun = "avaliação" if count == 1 else "avaliações"
+    text = f"{int(percent)}% positivas · {format_count_full(count)} {noun}"
+    if reviews.get("source") == PARTIAL_SOURCE:
+        text += " (contagem parcial)"
+    return text
+
+
 def build_embed(payload: dict) -> discord.Embed:
     appid = payload["appid"]
     name = (payload.get("name") or f"App {appid}")[:256]
@@ -36,6 +60,8 @@ def build_embed(payload: dict) -> discord.Embed:
     if end:
         embed.add_field(name="Termina", value=f"<t:{int(end)}:R>", inline=True)
     embed.add_field(name="Encontrado em", value=origin_label(payload.get("origins", [])), inline=True)
+    # "reviews" is not part of the persisted payload: the dispatcher adds it at send time.
+    embed.add_field(name="Avaliações", value=reviews_field_text(payload.get("reviews")), inline=False)
     if payload.get("image_url"):
         embed.set_image(url=payload["image_url"])
     embed.set_footer(text="Steam")
