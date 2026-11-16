@@ -157,6 +157,7 @@ class MonitorService:
         self._clock = clock
         self._lock = asyncio.Lock()
         self.last_summary: CycleSummary | None = None
+        self._store_items_seen: dict[int, StoreItem] = {}
 
     @property
     def running(self) -> bool:
@@ -171,6 +172,7 @@ class MonitorService:
         async with self._lock:
             started = time.monotonic()
             summary = CycleSummary(started_at=datetime.now(timezone.utc))
+            self._store_items_seen = {}
             specials = await self._fetch_specials(summary)
             await self._import_wishlists(summary)
             try:
@@ -178,6 +180,7 @@ class MonitorService:
             except Exception as exc:
                 log.exception("Detection step failed")
                 summary.errors.append(f"detect: {type(exc).__name__}")
+            await self._persist_reviews(specials, summary)
             if self.dispatcher is not None:
                 try:
                     result = await self.dispatcher.dispatch()
@@ -197,6 +200,24 @@ class MonitorService:
                 summary.baseline_recorded, summary.dispatched, len(summary.errors),
             )
             return summary
+
+    # --------------------------------------------------------------- reviews
+    async def _persist_reviews(self, specials: list[SpecialItem] | None, summary: CycleSummary) -> None:
+        """Cache the review summaries already present in this cycle's responses (no extra
+        requests). Never raises: ranking data must not break detection or notifications."""
+        try:
+            rows: list[tuple[int, int, int, str]] = []
+            for item in specials or []:
+                if item.review_count is not None and item.percent_positive is not None:
+                    source = "search_partial" if item.review_partial else "search"
+                    rows.append((item.appid, item.review_count, item.percent_positive, source))
+            for appid, item in self._store_items_seen.items():
+                if item.review_count is not None and item.percent_positive is not None:
+                    rows.append((appid, item.review_count, item.percent_positive, "browse"))
+            await self.repo.upsert_reviews(rows)
+        except Exception as exc:
+            log.exception("Could not store review summaries")
+            summary.errors.append(f"reviews: {type(exc).__name__}")
 
     # -------------------------------------------------------------- specials
     async def _fetch_specials(self, summary: CycleSummary) -> list[SpecialItem] | None:
@@ -312,6 +333,7 @@ class MonitorService:
                 log.warning("Store source failed: %s", type(exc).__name__)
                 failed = set(monitored)
                 summary.errors.append(f"store: {type(exc).__name__}")
+            self._store_items_seen = store_items
             summary.store_failed = len(failed)
             if not failed:
                 await self.repo.finish_check("store", "ok")
