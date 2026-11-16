@@ -254,7 +254,7 @@ async def test_store_request_shape_and_batching():
     url, params = http.calls[0]
     payload = json.loads(params["input_json"])
     assert payload["context"] == {"language": "brazilian", "country_code": "BR", "steam_realm": 1}
-    assert payload["data_request"] == {"include_basic_info": True}
+    assert payload["data_request"] == {"include_basic_info": True, "include_reviews": True}
 
 
 async def test_store_get_items_returns_known_and_ignores_unknown():

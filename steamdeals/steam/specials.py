@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -42,6 +43,11 @@ class SpecialItem:
     original_cents: int
     discount_pct: int
     image_url: str | None = None
+    # Review summary from the row tooltip; None when the row shows none or it cannot be parsed.
+    review_count: int | None = None
+    percent_positive: int | None = None
+    # True when the tooltip had extra paragraphs: the figures are an under-estimate.
+    review_partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,38 @@ class SpecialsPage:
     total_count: int
     rows_seen: int
     skipped: int
+
+
+# "98% das 2,227 análises ..." (thousands separators vary by locale: , . space, nbsp, narrow nbsp).
+_REVIEW_TOOLTIP = re.compile(
+    r"(\d{1,3})\s*%[^\d]{0,60}?(\d{1,3}(?:[.,\u00a0\u202f ]\d{3})+|\d+)"
+)
+
+
+# A second paragraph in the tooltip ("<br><br>...") means the figure is not the plain overall summary
+# (for example "calculated from reviews written in your language" or reviews excluded as off-topic).
+# Validated live: such a row showed 6,707 reviews where GetItems reports 767,416. The first paragraph
+# is still used, but flagged as partial (an under-estimate) so it never replaces better data.
+_EXTRA_PARAGRAPH = re.compile(r"<br\s*/?>\s*<br\s*/?>", re.I)
+
+
+def is_partial_tooltip(text: str | None) -> bool:
+    return isinstance(text, str) and _EXTRA_PARAGRAPH.search(text) is not None
+
+
+def parse_review_tooltip(text: str | None) -> tuple[int, int] | None:
+    """Return ``(review_count, percent_positive)`` from the first paragraph of a search tooltip."""
+    if not text or not isinstance(text, str):
+        return None
+    match = _REVIEW_TOOLTIP.search(_EXTRA_PARAGRAPH.split(text, maxsplit=1)[0])
+    if match is None:
+        return None
+    percent = int(match.group(1))
+    digits = re.sub(r"\D", "", match.group(2))
+    if not digits or not 0 <= percent <= 100:
+        return None
+    count = int(digits)
+    return (count, percent) if count > 0 else None
 
 
 class _RowParser(HTMLParser):
@@ -70,7 +108,9 @@ class _RowParser(HTMLParser):
         attrs = {k: (v or "") for k, v in attrs_list}
         classes = self._classes(attrs)
         if tag == "a" and "search_result_row" in classes:
-            self._row = {"attrs": attrs, "title": None, "original": None, "block": None, "image": None}
+            self._row = {
+                "attrs": attrs, "title": None, "original": None, "block": None, "image": None, "review": None,
+            }
             return
         row = self._row
         if row is None:
@@ -81,6 +121,8 @@ class _RowParser(HTMLParser):
             self._start("original")
         elif tag == "div" and "discount_block" in classes and row["block"] is None:
             row["block"] = attrs
+        elif tag == "span" and "search_review_summary" in classes and row["review"] is None:
+            row["review"] = attrs.get("data-tooltip-html")
         elif tag == "img" and row["image"] is None and attrs.get("src"):
             row["image"] = attrs["src"]
 
@@ -144,7 +186,14 @@ def parse_results_html(html: str) -> tuple[list[SpecialItem], int, int]:
             )
             skipped += 1
             continue
-        items.append(SpecialItem(appid, title, final, original, discount, row["image"]))
+        review = parse_review_tooltip(row["review"])
+        items.append(
+            SpecialItem(
+                appid, title, final, original, discount, row["image"],
+                review[0] if review else None, review[1] if review else None,
+                bool(review) and is_partial_tooltip(row["review"]),
+            )
+        )
     return items, len(parser.rows), skipped
 
 

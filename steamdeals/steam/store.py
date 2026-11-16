@@ -37,6 +37,8 @@ class StoreItem:
     formatted_original: str | None = None
     image_url: str | None = None
     is_free: bool = False
+    review_count: int | None = None
+    percent_positive: int | None = None
 
     @property
     def has_price(self) -> bool:
@@ -71,6 +73,23 @@ def _image_from(entry: dict, appid: int) -> str:
     return header_image_url(appid)
 
 
+def parse_reviews(entry: dict) -> tuple[int, int] | None:
+    """``(review_count, percent_positive)`` from ``reviews.summary_filtered`` (the overall rating
+    Steam shows), falling back to ``summary_unfiltered``. None when absent or unusable."""
+    reviews = entry.get("reviews")
+    if not isinstance(reviews, dict):
+        return None
+    for key in ("summary_filtered", "summary_unfiltered"):
+        summary = reviews.get(key)
+        if not isinstance(summary, dict):
+            continue
+        count = _to_int(summary.get("review_count"))
+        percent = _to_int(summary.get("percent_positive"))
+        if count is not None and percent is not None and count > 0 and 0 <= percent <= 100:
+            return count, percent
+    return None
+
+
 def parse_store_item(entry: dict) -> StoreItem | None:
     """Convert one ``store_items`` entry. Returns None for unusable entries."""
     appid = _to_int(entry.get("appid", entry.get("id")))
@@ -95,6 +114,7 @@ def parse_store_item(entry: dict) -> StoreItem | None:
             end = _to_int(discounts[0].get("discount_end_date"))
         if final is not None and original is None:
             original = final  # no discount: Steam omits the original price
+    review = parse_reviews(entry)
     return StoreItem(
         appid=appid,
         name=name,
@@ -107,6 +127,8 @@ def parse_store_item(entry: dict) -> StoreItem | None:
         formatted_original=formatted_original if isinstance(formatted_original, str) else None,
         image_url=_image_from(entry, appid),
         is_free=bool(entry.get("is_free")),
+        review_count=review[0] if review else None,
+        percent_positive=review[1] if review else None,
     )
 
 
@@ -179,7 +201,7 @@ class StoreClient:
                     "country_code": self._country_code,
                     "steam_realm": 1,
                 },
-                "data_request": {"include_basic_info": True},
+                "data_request": {"include_basic_info": True, "include_reviews": True},
             },
             separators=(",", ":"),
         )
