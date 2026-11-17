@@ -87,7 +87,7 @@ notifications are public. Each user can only change their own data.
 | `/steam_verificar` | **Administrators only** (the **Manage Server** permission, the same rule used for the details in `/steam_status`). Runs one monitoring cycle now, in the background: the reply is immediate and the result (duration, games checked, notifications enqueued and sent, failures per source) is sent as a follow-up when the cycle ends (about 4 minutes; interaction webhooks are valid for 15 minutes). |
 | `/steam_vincular steam_id` | Links your account (17-digit SteamID64 or a `steamcommunity.com/profiles/<id>` URL) and imports the wishlist (respecting the minimum import interval; during the interval the next cycle imports it). Custom URLs (`/id/name`) are not supported. |
 | `/steam_desvincular` | Removes the link and the games that came from the wishlist; manually added games stay. |
-| `/wishlist` | Lists your monitored games with the last known price (up to 25 items plus a count). |
+| `/wishlist` | Lists all your monitored games, cheapest first (free first, unknown price last; ties by name), 10 per page with Previous/Next buttons usable only by you. Shows the original price struck through, discount, "no promotion" and unavailable prices; manual games are tagged. It is a snapshot of the stored data: paging makes no Steam requests. |
 | `/wishlist_add appid` | Adds a game manually (autocomplete by name or numeric AppID; validated against Steam). Limit of 100 manual games per user; AppID up to 2^31-1. |
 | `/wishlist_remover appid` | Removes a game from the manual list (autocomplete over your own manual games). |
 | `/wishlist_importar` | Re-imports the linked wishlist now (120 s minimum interval per user). |
