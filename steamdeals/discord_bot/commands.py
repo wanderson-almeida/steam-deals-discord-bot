@@ -21,13 +21,13 @@ from typing import Callable
 import discord
 from discord import app_commands
 
-from ..steam.money import format_brl
 from ..steam.wishlist import InvalidSteamId, parse_steam_id
 from .offers import MAX_GAMES, OffersView, build_pages
+from .wishlist_view import WishlistView
+from .wishlist_view import build_pages as build_wishlist_pages
 
 log = logging.getLogger(__name__)
 
-MAX_LIST_ITEMS = 25
 MAX_MANUAL_GAMES = 100
 IMPORT_COOLDOWN_SECONDS = 120
 BLUE = 0x1B2838
@@ -65,15 +65,6 @@ def _parse_appid(text) -> int | None:
 def _is_admin(interaction) -> bool:
     perms = getattr(interaction.user, "guild_permissions", None)
     return bool(getattr(perms, "manage_guild", False) or getattr(perms, "administrator", False))
-
-
-def _price_text(game: dict) -> str:
-    final = game.get("final_cents")
-    if final is None:
-        return "aguardando verificação" if game.get("updated_at") is None else "sem preço"
-    if game.get("on_sale"):
-        return f"{format_brl(final)} (-{game.get('discount_pct') or 0}%)"
-    return f"{format_brl(final)} (sem desconto)"
 
 
 def _kwargs(content: str | None, embed: discord.Embed | None) -> dict:
@@ -320,17 +311,10 @@ class SteamCommands:
                 "Você não monitora nenhum jogo. Use `/steam_vincular` ou `/wishlist_add`.",
             )
             return
-        lines = []
-        for g in games[:MAX_LIST_ITEMS]:
-            tag = " (manual)" if g["sources"] == {"manual"} else ""
-            lines.append(f"**{_clean(g['name'] or str(g['appid']))}**{tag} — {_price_text(g)}")
-        extra = len(games) - MAX_LIST_ITEMS
-        if extra > 0:
-            lines.append(f"... e mais {extra} jogo(s).")
-        embed = discord.Embed(
-            title=f"Seus jogos monitorados ({len(games)})", description="\n".join(lines), color=BLUE
-        )
-        await self._reply(interaction, embed=embed)
+        # Snapshot taken now: paging never touches the DB or Steam again.
+        view = WishlistView(interaction.user.id, build_wishlist_pages(games))
+        await interaction.response.send_message(embeds=view.embeds, view=view, ephemeral=True)
+        view.interaction = interaction
 
     async def wishlist_add(self, interaction, appid: str) -> None:
         app_id = _parse_appid(appid)

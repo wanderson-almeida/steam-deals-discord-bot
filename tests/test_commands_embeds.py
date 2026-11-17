@@ -7,7 +7,6 @@ from discord import app_commands
 from conftest import FakeStore, FakeWishlist, store_item
 from steamdeals.discord_bot.commands import (
     IMPORT_COOLDOWN_SECONDS,
-    MAX_LIST_ITEMS,
     MAX_MANUAL_GAMES,
     SteamCommands,
     register_commands,
@@ -180,7 +179,7 @@ async def test_wishlist_empty_message(cmds):
     i.assert_all_ephemeral()
 
 
-async def test_wishlist_truncates_to_25_with_count_and_shows_db_prices(cmds, repo):
+async def test_wishlist_is_paginated_without_truncation_and_shows_db_prices(cmds, repo):
     for n in range(30):
         await repo.add_manual(1, 100 + n, f"Game {n:02d}")
     await repo.add_manual(2, 999, "Someone else")
@@ -189,14 +188,17 @@ async def test_wishlist_truncates_to_25_with_count_and_shows_db_prices(cmds, rep
     await repo.apply_cycle(CycleChanges(states=[StateUpdate(snap, set_signature=True)]))
     i = FakeInteraction(1)
     await cmds.wishlist(i)
-    embed = i.response.messages[0]["embed"]
-    lines = embed.description.splitlines()
-    assert len(lines) == MAX_LIST_ITEMS + 1
-    assert lines[-1] == "... e mais 5 jogo(s)."
-    assert "(30)" in embed.title
-    assert "R$ 16,74 (-75%)" in lines[0] and "Game 00" in lines[0]  # on-sale first
-    assert "Someone else" not in embed.description
+    message = i.response.messages[0]
+    embed = message["embeds"][0]
+    lines = [ln for ln in embed.description.splitlines() if ln.startswith("`")]
+    assert len(lines) == 10 and "... e mais" not in embed.description
+    assert embed.title == "Minha Wishlist — Steam"
+    assert "**30** jogo(s)" in embed.description
+    assert "R$ 16,74" in lines[0] and "Game 00" in lines[0] and "(-75%)" in lines[0]  # only priced game
     assert "aguardando verificação" in lines[1]
+    assert embed.footer.text == "Página 1/3"
+    assert len(message["view"].pages) == 3
+    assert "Someone else" not in embed.description
     i.assert_all_ephemeral()
 
 
